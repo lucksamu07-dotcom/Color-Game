@@ -374,6 +374,7 @@ function buildStart() {
   const playedToday = stats.dailyPlayed[today];
   const activeTitleItem = stats.activeTitle ? SHOP_ITEMS.find(i => i.id === stats.activeTitle) : null;
   const userRank = activeTitleItem?.titleText || (stats.gamesPlayed > 0 ? getRank(stats.bestScore) : '🌱 Novato');
+  const activePowerUps = ['extraHints','extraTime','extraRetry','inkMultiplierGames','xpMultiplierGames','streakShield'].filter(k => (stats[k] || 0) > 0).length;
   
   // Novedad: El modo diario se bloquea a un solo intento solo si el jugador ya conoce el juego (>5 partidas)
   const isDailyLocked = (stats.gamesPlayed >= 5) && (playedToday !== undefined);
@@ -389,7 +390,7 @@ function buildStart() {
       </div>
     </div>
     <button id="btn-history" class="btn-icon" style="position:absolute; top:56px; right:24px;" title="Muro de Historial" aria-label="Historial de partidas">${wallSVG}</button>
-    <button id="btn-shop" class="btn-icon${stats.extraHints > 0 ? ' btn-icon--badge' : ''}" style="position:absolute; top:56px; left:24px;" title="Tienda de Tinta" aria-label="Abrir tienda">${shopSVG}${stats.extraHints > 0 ? `<span class="shop-badge">${stats.extraHints}</span>` : ''}</button>
+    <button id="btn-shop" class="btn-icon${activePowerUps > 0 ? ' btn-icon--badge' : ''}" style="position:absolute; top:56px; left:24px;" title="Tienda de Tinta" aria-label="Abrir tienda">${shopSVG}${activePowerUps > 0 ? `<span class="shop-badge">${activePowerUps}</span>` : ''}</button>
     <div class="title-row">${letters}</div>
     <div class="rank-badge${stats.activeTitle === 'chromatico' ? ' rank-badge--rainbow' : ''}" title="Basado en tu Mejor Puntuación">${userRank}</div>
     <div class="stats-row">
@@ -616,6 +617,7 @@ function buildMemorize(color) {
         <div class="timer-label">seg. para recordar</div>
       </div>
     </div>
+    <div class="mem-color-name">${getColorName(color.h, color.s, color.v)}</div>
     <span class="mem-brand">Color Game</span>
   `;
   app.appendChild(el);
@@ -1312,18 +1314,35 @@ function buildHistory() {
   el.style.flexDirection = 'column';
   el.style.maxHeight = '80vh';
   
-  let gridHtml = '';
+  let top5Html = '';
+  let recentHtml = '';
+
   if (!stats.history || stats.history.length === 0) {
-    gridHtml = `<div style="text-align:center; color:#555; padding:40px 0;">Aún no has jugado ninguna partida.</div>`;
+    recentHtml = `<div style="text-align:center; color:#555; padding:40px 0;">Aún no has jugado ninguna partida.</div>`;
   } else {
-    const rev = [...stats.history].reverse();
-    gridHtml = rev.map(game => {
+    const medals = ['🥇','🥈','🥉','4️⃣','5️⃣'];
+    const sorted = [...stats.history].sort((a, b) => b.score - a.score).slice(0, 5);
+    top5Html = sorted.map((game, rank) => {
       const date = new Date(game.date).toLocaleDateString();
       const modeIco = game.mode === 'daily' ? '📅' : (game.mode === 'challenge' ? '⚔️' : '👤');
-      const swatches = game.colors.map(c => 
+      return `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#161616; border-radius:12px; margin-bottom:8px; border:1px solid #1e1e1e;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:1.1rem;">${medals[rank]}</span>
+            <div style="font-size:0.75rem; color:#888; font-weight:700;">${modeIco} ${date}</div>
+          </div>
+          <div style="font-size:1.3rem; font-weight:900; color:${game.score >= 9 ? '#4cd964' : (game.score >= 7 ? '#ffcc00' : '#ff3b30')}">${game.score.toFixed(2)}</div>
+        </div>
+      `;
+    }).join('');
+
+    const rev = [...stats.history].reverse();
+    recentHtml = rev.map(game => {
+      const date = new Date(game.date).toLocaleDateString();
+      const modeIco = game.mode === 'daily' ? '📅' : (game.mode === 'challenge' ? '⚔️' : '👤');
+      const swatches = game.colors.map(c =>
         `<div style="width:24px; height:24px; border-radius:6px; background:${hsvToCss(c.target.h, c.target.s, c.target.v)}" title="${getColorName(c.target.h, c.target.s, c.target.v)}"></div>`
       ).join('');
-      
       return `
         <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:#181818; border-radius:12px; margin-bottom:10px; border:1px solid #222;">
           <div>
@@ -1342,7 +1361,8 @@ function buildHistory() {
       <button id="btn-hist-close" class="btn-icon-close" aria-label="Cerrar historial">&times;</button>
     </div>
     <div style="overflow-y:auto; flex:1; padding-right:8px;" class="custom-scrollbar">
-      ${gridHtml}
+      ${top5Html ? `<div class="shop-section-title">🏆 Top 5</div>${top5Html}<div class="shop-section-title" style="margin-top:8px;">📋 Historial Reciente</div>` : ''}
+      ${recentHtml}
     </div>
   `;
   app.appendChild(el);
@@ -1367,6 +1387,7 @@ const SHOP_ITEMS = [
     price: 50,
     icon: '💡',
     stat: 'extraHints',
+    maxStack: 3,
   },
   {
     id: 'extraTime',
@@ -1375,6 +1396,7 @@ const SHOP_ITEMS = [
     price: 75,
     icon: '⏱️',
     stat: 'extraTime',
+    maxStack: 3,
   },
   {
     id: 'extraRetry',
@@ -1383,6 +1405,7 @@ const SHOP_ITEMS = [
     price: 130,
     icon: '🔄',
     stat: 'extraRetry',
+    maxStack: 3,
   },
   {
     id: 'inkMultiplier',
@@ -1409,6 +1432,7 @@ const SHOP_ITEMS = [
     price: 150,
     icon: '🛡️',
     stat: 'streakShield',
+    maxStack: 3,
   },
   {
     id: 'themeForest',
@@ -1469,63 +1493,87 @@ function buildShop() {
 
   function renderInk() { return Math.floor(stats.ink || 0); }
 
-  const itemsHtml = SHOP_ITEMS.map(item => {
-    const isTheme   = item.type === 'theme';
-    const isTitle   = item.type === 'title';
-    const isOneshot = item.type === 'oneshot';
-    const isOwned   = isTheme  ? (stats.unlockedThemes || []).includes(item.id)
-                    : isTitle  ? (stats.unlockedTitles || []).includes(item.id)
-                    : isOneshot ? !!stats[item.stat]
-                    : false;
-    const isActive  = (isTheme  && stats.activeTheme === item.id)
-                   || (isTitle  && stats.activeTitle  === item.id)
-                   || (isOneshot && !!stats[item.stat]);
-    const owned     = (!isTheme && !isTitle && !isOneshot) ? (stats[item.stat] || 0) : 0;
-    const affordable = (stats.ink || 0) >= item.price;
+  let confirmingBtn = null;
+  let confirmTimeout = null;
 
-    let btnClass = 'shop-item-btn';
-    let btnDisabled = '';
-    let btnLabel = `<span class="ink-drop">💧</span> ${item.price}`;
+  function cancelConfirm() {
+    if (!confirmingBtn) return;
+    confirmingBtn.innerHTML = confirmingBtn._origHtml;
+    confirmingBtn.style.background = '';
+    confirmingBtn.style.color = '';
+    confirmingBtn.style.border = '';
+    confirmingBtn = null;
+    if (confirmTimeout) { clearTimeout(confirmTimeout); confirmTimeout = null; }
+  }
 
-    if (isTheme || isTitle || isOneshot) {
-      if (isActive) {
-        btnClass += ' active-theme'; btnDisabled = 'disabled';
-        btnLabel = '✓ Activo';
-      } else if (isOwned && !isOneshot) {
-        btnLabel = 'Equipar';
+  function renderItems(items) {
+    return items.map(item => {
+      const isTheme   = item.type === 'theme';
+      const isTitle   = item.type === 'title';
+      const isOneshot = item.type === 'oneshot';
+      const isOwned   = isTheme  ? (stats.unlockedThemes || []).includes(item.id)
+                      : isTitle  ? (stats.unlockedTitles || []).includes(item.id)
+                      : isOneshot ? !!stats[item.stat]
+                      : false;
+      const isActive  = (isTheme  && stats.activeTheme === item.id)
+                     || (isTitle  && stats.activeTitle  === item.id)
+                     || (isOneshot && !!stats[item.stat]);
+      const owned     = (!isTheme && !isTitle && !isOneshot) ? (stats[item.stat] || 0) : 0;
+      const affordable = (stats.ink || 0) >= item.price;
+      const atMaxStack = item.maxStack !== undefined && owned >= item.maxStack;
+
+      let btnClass = 'shop-item-btn';
+      let btnDisabled = '';
+      let btnLabel = `<span class="ink-drop">💧</span> ${item.price}`;
+
+      if (isTheme || isTitle || isOneshot) {
+        if (isActive) {
+          btnClass += ' active-theme'; btnDisabled = 'disabled';
+          btnLabel = '✓ Activo';
+        } else if (isOwned && !isOneshot) {
+          btnLabel = 'Equipar';
+        } else if (!affordable) {
+          btnClass += ' disabled'; btnDisabled = 'disabled';
+        }
+      } else if (atMaxStack) {
+        btnClass += ' disabled'; btnDisabled = 'disabled';
+        btnLabel = 'Máx.';
       } else if (!affordable) {
         btnClass += ' disabled'; btnDisabled = 'disabled';
       }
-    } else if (!affordable) {
-      btnClass += ' disabled'; btnDisabled = 'disabled';
-    }
 
-    const ownedHtml = owned > 0
-      ? `<div class="shop-item-owned">${item.perPurchase ? `<strong>${owned}</strong> partidas restantes` : `Tienes: <strong>${owned}</strong>`}</div>`
-      : '';
+      let ownedHtml = '';
+      if (owned > 0) {
+        const stackInfo = item.maxStack ? ` / ${item.maxStack}` : '';
+        ownedHtml = `<div class="shop-item-owned">${item.perPurchase ? `<strong>${owned}</strong> partidas restantes` : `Tienes: <strong>${owned}</strong>${stackInfo}`}</div>`;
+      }
 
-    return `
-      <div class="shop-item">
-        <div class="shop-item-icon">${item.icon}</div>
-        <div class="shop-item-info">
-          <div class="shop-item-name">${item.name}</div>
-          <div class="shop-item-desc">${item.desc}</div>
-          ${ownedHtml}
+      return `
+        <div class="shop-item">
+          <div class="shop-item-icon">${item.icon}</div>
+          <div class="shop-item-info">
+            <div class="shop-item-name">${item.name}</div>
+            <div class="shop-item-desc">${item.desc}</div>
+            ${ownedHtml}
+          </div>
+          <button
+            class="${btnClass}"
+            data-id="${item.id}"
+            data-price="${item.price}"
+            data-stat="${item.stat || ''}"
+            data-per-purchase="${item.perPurchase || 1}"
+            data-type="${item.type || 'consumable'}"
+            ${btnDisabled}
+            aria-label="${isActive ? `${item.name} activo` : `Comprar ${item.name} por ${item.price} gotas`}">
+            ${btnLabel}
+          </button>
         </div>
-        <button
-          class="${btnClass}"
-          data-id="${item.id}"
-          data-price="${item.price}"
-          data-stat="${item.stat || ''}"
-          data-per-purchase="${item.perPurchase || 1}"
-          data-type="${item.type || 'consumable'}"
-          ${btnDisabled}
-          aria-label="${isActive ? `${item.name} activo` : `Comprar ${item.name} por ${item.price} gotas`}">
-          ${btnLabel}
-        </button>
-      </div>
-    `;
-  }).join('');
+      `;
+    }).join('');
+  }
+
+  const upgrades  = SHOP_ITEMS.filter(i => !i.type || i.type === 'consumable');
+  const cosmetics = SHOP_ITEMS.filter(i =>  i.type && i.type !== 'consumable');
 
   el.innerHTML = `
     <div class="shop-header">
@@ -1538,85 +1586,134 @@ function buildShop() {
       <span style="color:#666; font-size:0.75rem; margin-left:2px;">gotas disponibles</span>
     </div>
     <div class="custom-scrollbar" style="overflow-y:auto; flex:1; padding-right:4px;">
-      <div id="shop-items-list">${itemsHtml}</div>
+      <div class="shop-section-title">⚡ Mejoras</div>
+      <div id="shop-upgrades">${renderItems(upgrades)}</div>
+      <div class="shop-section-title" style="margin-top:8px;">🎨 Estética</div>
+      <div id="shop-cosmetics">${renderItems(cosmetics)}</div>
     </div>
   `;
   app.appendChild(el);
 
-  gsap.fromTo(el, { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: 'power2.out' });
+  gsap.fromTo(el,
+    { y: 60, opacity: 0, scale: 0.97 },
+    { y: 0,  opacity: 1, scale: 1, duration: 0.35, ease: 'back.out(1.5)' }
+  );
+
+  function doPurchase(btn) {
+    const price       = parseInt(btn.dataset.price);
+    const stat        = btn.dataset.stat;
+    const perPurchase = parseInt(btn.dataset.perPurchase || '1');
+    const itemId      = btn.dataset.id;
+    const itemType    = btn.dataset.type;
+    const itemDef     = SHOP_ITEMS.find(i => i.id === itemId);
+
+    if (itemType === 'theme' || itemType === 'title') {
+      const unlockedKey = itemType === 'theme' ? 'unlockedThemes' : 'unlockedTitles';
+      const activeKey   = itemType === 'theme' ? 'activeTheme'    : 'activeTitle';
+      const alreadyOwned = (stats[unlockedKey] || []).includes(itemId);
+      if (!alreadyOwned) {
+        if ((stats.ink || 0) < price) return;
+        stats.ink -= price;
+        stats[unlockedKey] = [...(stats[unlockedKey] || []), itemId];
+      }
+      stats[activeKey] = itemId;
+      saveStats(); playSuccess(); vibrate(30);
+      gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
+      return;
+    }
+
+    if (itemType === 'oneshot') {
+      if ((stats.ink || 0) < price || stats[stat]) return;
+      stats.ink -= price;
+      stats[stat] = true;
+      saveStats(); playSuccess(); vibrate(30);
+      gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
+      return;
+    }
+
+    if ((stats.ink || 0) < price) return;
+    if (itemDef?.maxStack !== undefined && (stats[stat] || 0) >= itemDef.maxStack) return;
+    stats.ink -= price;
+    stats[stat] = (stats[stat] || 0) + perPurchase;
+    saveStats();
+    playSuccess();
+    vibrate(30);
+
+    document.getElementById('shop-ink-count').textContent = renderInk();
+
+    const origLabel = `<span class="ink-drop">💧</span> ${price}`;
+    btn.innerHTML = '¡Comprado!';
+    btn.classList.add('bought');
+    gsap.fromTo(btn, { scale: 0.9 }, { scale: 1, duration: 0.25, ease: 'back.out(2)' });
+
+    setTimeout(() => {
+      const currentOwned = stats[stat] || 0;
+      const atMax = itemDef?.maxStack !== undefined && currentOwned >= itemDef.maxStack;
+      if (atMax) {
+        btn.innerHTML = 'Máx.';
+        btn.classList.add('disabled');
+        btn.classList.remove('bought');
+        btn.disabled = true;
+      } else if ((stats.ink || 0) < price) {
+        btn.innerHTML = origLabel;
+        btn.classList.add('disabled');
+        btn.classList.remove('bought');
+        btn.disabled = true;
+      } else {
+        btn.innerHTML = origLabel;
+        btn.classList.remove('bought');
+      }
+      const stackInfo = itemDef?.maxStack ? ` / ${itemDef.maxStack}` : '';
+      const newOwnedHtml = itemDef?.perPurchase
+        ? `<strong>${currentOwned}</strong> partidas restantes`
+        : `Tienes: <strong>${currentOwned}</strong>${stackInfo}`;
+      const ownedEl = btn.closest('.shop-item').querySelector('.shop-item-owned');
+      if (ownedEl) ownedEl.innerHTML = newOwnedHtml;
+      else {
+        const info = btn.closest('.shop-item').querySelector('.shop-item-info');
+        const d = document.createElement('div');
+        d.className = 'shop-item-owned';
+        d.innerHTML = newOwnedHtml;
+        info.appendChild(d);
+      }
+    }, 1200);
+  }
 
   el.querySelectorAll('.shop-item-btn:not([disabled])').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const price       = parseInt(btn.dataset.price);
-      const stat        = btn.dataset.stat;
-      const perPurchase = parseInt(btn.dataset.perPurchase || '1');
-      const itemId      = btn.dataset.id;
-      const itemType    = btn.dataset.type;
-      const itemDef     = SHOP_ITEMS.find(i => i.id === itemId);
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
 
-      if (itemType === 'theme' || itemType === 'title') {
-        const unlockedKey = itemType === 'theme' ? 'unlockedThemes' : 'unlockedTitles';
-        const activeKey   = itemType === 'theme' ? 'activeTheme'    : 'activeTitle';
-        const alreadyOwned = (stats[unlockedKey] || []).includes(itemId);
-        if (!alreadyOwned) {
-          if ((stats.ink || 0) < price) return;
-          stats.ink -= price;
-          stats[unlockedKey] = [...(stats[unlockedKey] || []), itemId];
-        }
-        stats[activeKey] = itemId;
-        saveStats(); playSuccess(); vibrate(30);
-        gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
+      const itemId   = btn.dataset.id;
+      const itemType = btn.dataset.type;
+      const unlockedKey = itemType === 'theme' ? 'unlockedThemes' : 'unlockedTitles';
+      const isEquip = (itemType === 'theme' || itemType === 'title') && (stats[unlockedKey] || []).includes(itemId);
+
+      if (isEquip) { doPurchase(btn); return; }
+
+      if (confirmingBtn === btn) {
+        cancelConfirm();
+        doPurchase(btn);
         return;
       }
 
-      if (itemType === 'oneshot') {
-        if ((stats.ink || 0) < price || stats[stat]) return;
-        stats.ink -= price;
-        stats[stat] = true;
-        saveStats(); playSuccess(); vibrate(30);
-        gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
-        return;
-      }
+      cancelConfirm();
+      confirmingBtn = btn;
+      btn._origHtml = btn.innerHTML;
+      btn.innerHTML = '¿Confirmar?';
+      btn.style.background = 'rgba(255,165,0,0.15)';
+      btn.style.color = '#ffaa00';
+      btn.style.border = '1px solid rgba(255,165,0,0.35)';
 
-      if ((stats.ink || 0) < price) return;
-      stats.ink -= price;
-      stats[stat] = (stats[stat] || 0) + perPurchase;
-      saveStats();
-      playSuccess();
-      vibrate(30);
-
-      document.getElementById('shop-ink-count').textContent = renderInk();
-
-      const origHtml = btn.innerHTML;
-      btn.innerHTML = '¡Comprado!';
-      btn.classList.add('bought');
-      gsap.fromTo(btn, { scale: 0.9 }, { scale: 1, duration: 0.25, ease: 'back.out(2)' });
-
-      setTimeout(() => {
-        btn.innerHTML = origHtml;
-        btn.classList.remove('bought');
-        if ((stats.ink || 0) < price) {
-          btn.classList.add('disabled');
-          btn.disabled = true;
-        }
-        const newOwned = stats[stat] || 0;
-        const newOwnedHtml = itemDef?.perPurchase
-          ? `<strong>${newOwned}</strong> partidas restantes`
-          : `Tienes: <strong>${newOwned}</strong>`;
-        const ownedEl = btn.closest('.shop-item').querySelector('.shop-item-owned');
-        if (ownedEl) ownedEl.innerHTML = newOwnedHtml;
-        else {
-          const info = btn.closest('.shop-item').querySelector('.shop-item-info');
-          const d = document.createElement('div');
-          d.className = 'shop-item-owned';
-          d.innerHTML = newOwnedHtml;
-          info.appendChild(d);
-        }
-      }, 1200);
+      confirmTimeout = setTimeout(() => {
+        if (confirmingBtn === btn) cancelConfirm();
+      }, 2500);
     });
   });
 
+  el.addEventListener('click', () => cancelConfirm());
+
   document.getElementById('btn-shop-close').addEventListener('click', () => {
+    cancelConfirm();
     gsap.to(el, { y: 20, opacity: 0, duration: 0.2, onComplete: () => {
       el.remove();
       buildStart();
@@ -1688,10 +1785,11 @@ function initParticles() {
   }));
 }
 
+let pPaused = false;
 let lastPColorStr = '';
 let lastPDraw = 0;
 function drawParticles(now) {
-  if (!pCanvas) return;
+  if (!pCanvas || pPaused) return;
   requestAnimationFrame(drawParticles);
   
   // Limitar a 30fps para ahorrar batería y CPU si no es necesario más
@@ -1723,6 +1821,10 @@ function drawParticles(now) {
 }
 
 window.addEventListener('resize', initParticles);
+document.addEventListener('visibilitychange', () => {
+  pPaused = document.hidden;
+  if (!pPaused) requestAnimationFrame(drawParticles);
+});
 initParticles();
 drawParticles();
 
