@@ -1774,16 +1774,20 @@ function initParticles() {
   if (!pCanvas) return;
   pCanvas.width = window.innerWidth;
   pCanvas.height = window.innerHeight;
-  const count = isMobile ? 30 : 85;
-  particles = Array.from({ length: count }, () => ({
-    x: Math.random() * pCanvas.width,
-    y: Math.random() * pCanvas.height,
-    r: Math.random() * 2.5 + 1,
-    vx: (Math.random() - 0.5) * 0.4,
-    vy: -(Math.random() * 0.8 + 0.2),
-    alpha: Math.random() * 0.5 + 0.3,
-    phase: Math.random() * Math.PI * 2
-  }));
+  const count = isMobile ? 35 : 90;
+  particles = Array.from({ length: count }, () => {
+    const theme = stats.activeTheme;
+    return {
+      x: Math.random() * pCanvas.width,
+      y: Math.random() * pCanvas.height,
+      r: Math.random() * 2.5 + 1.2,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: -(Math.random() * 0.8 + 0.2),
+      alpha: Math.random() * 0.5 + 0.3,
+      phase: Math.random() * Math.PI * 2,
+      hueOffset: (Math.random() - 0.5) * 30 // Variación de tono para cada partícula
+    };
+  });
 }
 
 let pPaused = false;
@@ -1798,33 +1802,81 @@ function drawParticles(now) {
 
   pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
   
-  const colorStr = pActiveColor
+  const theme = stats.activeTheme;
+  const baseColor = pActiveColor
     ? hsvToCss(pActiveColor.h, pActiveColor.s, pActiveColor.v)
-    : (stats.activeTheme ? THEME_COLORS[stats.activeTheme] : '#888888');
+    : (theme ? THEME_COLORS[theme] : '#888888');
   
-  pCtx.fillStyle = colorStr;
-  pCtx.shadowBlur = isMobile ? 0 : 12; // Brillo solo en desktop para rendimiento
-  pCtx.shadowColor = colorStr;
+  pCtx.shadowBlur = isMobile ? 0 : (theme === 'themeFire' ? 15 : 10);
   
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
     pCtx.globalAlpha = p.alpha;
     
-    const sway = Math.sin(now / 1200 + p.phase) * 0.25;
+    // Variación de color por partícula para temas naturales
+    let pColor = baseColor;
+    if (theme === 'themeForest' && !pActiveColor) {
+      pColor = `hsl(${140 + p.hueOffset}, 45%, ${50 + (p.alpha * 20)}%)`;
+    } else if (theme === 'themeFire' && !pActiveColor) {
+      pColor = `hsl(${20 + p.hueOffset}, 85%, ${50 + (p.alpha * 20)}%)`;
+    }
+
+    pCtx.fillStyle = pColor;
+    pCtx.strokeStyle = pColor;
+    pCtx.shadowColor = pColor;
     
-    pCtx.beginPath();
-    pCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    pCtx.fill();
+    const sway = Math.sin(now / 1200 + p.phase) * 0.3;
     
-    p.x += p.vx + sway; 
-    p.y += p.vy;
+    if (theme === 'themeForest') {
+      // HOJAS: Elipses rotando suavemente
+      pCtx.save();
+      pCtx.translate(p.x, p.y);
+      pCtx.rotate(p.phase + now / 1500);
+      pCtx.beginPath();
+      pCtx.ellipse(0, 0, p.r * 1.8, p.r * 0.8, 0, 0, Math.PI * 2);
+      pCtx.fill();
+      pCtx.restore();
+    } 
+    else if (theme === 'themeOcean') {
+      // BURBUJAS: Círculos con borde y algunos rellenos
+      pCtx.beginPath();
+      pCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      if (i % 2 === 0) {
+        pCtx.lineWidth = 1.5;
+        pCtx.stroke();
+      } else {
+        pCtx.fill();
+      }
+    }
+    else if (theme === 'themeFire') {
+      // CHISPAS: Triángulos/Llamas que parpadean
+      const flicker = Math.sin(now / 80 + p.phase) * 0.3 + 0.7;
+      pCtx.globalAlpha = p.alpha * flicker;
+      pCtx.beginPath();
+      pCtx.moveTo(p.x, p.y - p.r * 2.5);
+      pCtx.lineTo(p.x - p.r, p.y);
+      pCtx.lineTo(p.x + p.r, p.y);
+      pCtx.closePath();
+      pCtx.fill();
+    }
+    else {
+      // PUNTOS: El efecto premium por defecto
+      pCtx.beginPath();
+      pCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      pCtx.fill();
+    }
     
-    if (p.y < -20) { 
-      p.y = pCanvas.height + 20; 
+    // FÍSICA
+    const speedMult = theme === 'themeFire' ? 1.8 : (theme === 'themeOcean' ? 0.7 : 1);
+    p.x += (p.vx + sway) * speedMult; 
+    p.y += p.vy * speedMult;
+    
+    if (p.y < -30) { 
+      p.y = pCanvas.height + 30; 
       p.x = Math.random() * pCanvas.width; 
     }
-    if (p.x < -20) p.x = pCanvas.width + 20;
-    if (p.x > pCanvas.width + 20) p.x = -20;
+    if (p.x < -30) p.x = pCanvas.width + 30;
+    if (p.x > pCanvas.width + 30) p.x = -30;
   }
 }
 
