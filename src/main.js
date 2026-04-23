@@ -7,7 +7,9 @@ let isMuted = localStorage.getItem('colorGameMuted') === 'true';
 
 function initAudio() {
   if (!audioCtx && !isMuted) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (_) {}
   }
 }
 
@@ -15,8 +17,8 @@ function playTone(freq, type, duration, vol=0.1) {
   if (isMuted) return;
   if (!audioCtx) initAudio();
   if (!audioCtx) return;
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = type;
@@ -36,7 +38,7 @@ function playPop() {
   if (isMuted) return;
   if (!audioCtx) initAudio();
   if (!audioCtx) return;
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.frequency.setValueAtTime(600, audioCtx.currentTime);
@@ -54,27 +56,64 @@ function playBeepHigh() { playTone(880, 'square', 0.15, 0.05); }
 
 function playReveal(score) {
   if (score >= 9.5) {
-    playTone(440, 'sine', 0.8, 0.1);
-    playTone(554, 'sine', 0.8, 0.1);
-    playTone(659, 'sine', 0.8, 0.1);
-    playTone(880, 'sine', 0.8, 0.1);
-  } else if (score < 5.0) {
-    playTone(200, 'sawtooth', 0.3, 0.1);
-    setTimeout(() => playTone(150, 'sawtooth', 0.5, 0.1), 250);
+    // Acorde Mayor 7 brillante
+    [440, 554.37, 659.25, 830.61].forEach((f, i) => {
+      setTimeout(() => playTone(f, 'sine', 1.2, 0.1), i * 60);
+    });
+  } else if (score >= 8.0) {
+    // Acorde Mayor
+    [440, 554.37, 659.25].forEach((f, i) => {
+      setTimeout(() => playTone(f, 'sine', 0.8, 0.1), i * 50);
+    });
+  } else if (score < 4.0) {
+    // Sonido de fallo dramático
+    playTone(180, 'sawtooth', 0.4, 0.15);
+    setTimeout(() => playTone(140, 'sawtooth', 0.6, 0.15), 150);
   } else {
-    playTone(300, 'triangle', 0.1, 0.1);
-    setTimeout(() => playTone(400, 'triangle', 0.2, 0.1), 100);
+    // Sonido neutro/bien
+    playTone(440, 'triangle', 0.15, 0.1);
+    setTimeout(() => playTone(523.25, 'triangle', 0.25, 0.1), 100);
   }
+}
+
+function playLevelUp() {
+  const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+  notes.forEach((freq, i) => {
+    setTimeout(() => playTone(freq, 'sine', 0.4, 0.1), i * 150);
+  });
+}
+
+function playClick() {
+  playTone(800, 'sine', 0.05, 0.05);
+}
+
+function playSuccess() {
+  playTone(523.25, 'sine', 0.1, 0.1);
+  setTimeout(() => playTone(659.25, 'sine', 0.15, 0.1), 80);
+}
+
+let lastSlideTime = 0;
+function playSliderSound(freq) {
+  const now = Date.now();
+  if (now - lastSlideTime < 40) return; // Limitar frecuencia de sonidos
+  lastSlideTime = now;
+  playTone(freq, 'sine', 0.05, 0.03);
+}
+
+function vibrate(ms) {
+  if (navigator.vibrate) navigator.vibrate(ms);
 }
 
 const muteBtn = document.createElement('button');
 muteBtn.className = 'btn-mute';
 muteBtn.innerHTML = isMuted ? '🔇' : '🔊';
+muteBtn.setAttribute('aria-label', isMuted ? 'Activar sonido' : 'Silenciar');
 document.body.appendChild(muteBtn);
 muteBtn.addEventListener('click', () => {
   isMuted = !isMuted;
   localStorage.setItem('colorGameMuted', isMuted);
   muteBtn.innerHTML = isMuted ? '🔇' : '🔊';
+  muteBtn.setAttribute('aria-label', isMuted ? 'Activar sonido' : 'Silenciar');
   if (!isMuted) initAudio();
 });
 
@@ -89,6 +128,21 @@ let stats = JSON.parse(localStorage.getItem('colorGameStats')) || {
 };
 if (!stats.history) stats.history = [];
 if (stats.ink === undefined) stats.ink = 0;
+if (stats.xp === undefined) stats.xp = 0;
+if (stats.level === undefined) stats.level = 1;
+if (stats.extraHints === undefined) stats.extraHints = 0;
+if (stats.extraTime === undefined) stats.extraTime = 0;
+if (stats.extraRetry === undefined) stats.extraRetry = 0;
+if (stats.inkMultiplierGames === undefined) stats.inkMultiplierGames = 0;
+if (stats.xpMultiplierGames === undefined) stats.xpMultiplierGames = 0;
+if (stats.streakShield === undefined) stats.streakShield = 0;
+if (!stats.unlockedThemes) stats.unlockedThemes = [];
+if (stats.activeTheme === undefined) stats.activeTheme = null;
+if (!stats.unlockedTitles) stats.unlockedTitles = [];
+if (stats.activeTitle === undefined) stats.activeTitle = null;
+if (stats.premiumConfetti === undefined) stats.premiumConfetti = false;
+
+function getXPNeeded(lvl) { return Math.floor(100 * Math.pow(lvl, 1.5)); }
 
 function saveStats() {
   localStorage.setItem('colorGameStats', JSON.stringify(stats));
@@ -233,9 +287,10 @@ let pickerUpdatePending = false;
 
 // -- URL Challenge parsing --
 const urlParams = new URLSearchParams(window.location.search);
-let challengeMode = urlParams.has('reto');
-let challengeSeed = urlParams.get('reto');
-let challengeDiffIdx = parseInt(urlParams.get('diff')) || 0;
+const _rawSeed = urlParams.get('reto') || '';
+let challengeSeed = _rawSeed.replace(/[^a-zA-Z0-9_\-.]/g, '').slice(0, 64);
+let challengeMode = challengeSeed.length > 0;
+let challengeDiffIdx = Math.max(0, Math.min(DIFFS.length - 1, parseInt(urlParams.get('diff')) || 0));
 
 const app = document.getElementById('app');
 
@@ -311,12 +366,14 @@ function buildStart() {
   const personSVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
   const calendarSVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`;
   const wallSVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>`;
+  const shopSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>`;
 
   const letters = 'color'.split('').map(l => `<span class="title-letter">${l}</span>`).join('');
   
   const today = getTodayStr();
   const playedToday = stats.dailyPlayed[today];
-  const userRank = stats.gamesPlayed > 0 ? getRank(stats.bestScore) : '🌱 Novato';
+  const activeTitleItem = stats.activeTitle ? SHOP_ITEMS.find(i => i.id === stats.activeTitle) : null;
+  const userRank = activeTitleItem?.titleText || (stats.gamesPlayed > 0 ? getRank(stats.bestScore) : '🌱 Novato');
   
   // Novedad: El modo diario se bloquea a un solo intento solo si el jugador ya conoce el juego (>5 partidas)
   const isDailyLocked = (stats.gamesPlayed >= 5) && (playedToday !== undefined);
@@ -325,9 +382,16 @@ function buildStart() {
     <div class="ink-badge" style="position:absolute; top:24px; left:24px;" title="Gotas de Tinta">
       <span class="ink-drop">💧</span> ${Math.floor(stats.ink || 0)}
     </div>
-    <button id="btn-history" style="position:absolute; top:24px; right:24px; background:transparent; border:none; color:#555; cursor:pointer; transition:color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#555'" title="Muro de Historial">${wallSVG}</button>
+    <div style="position:absolute; top:24px; right:24px; text-align:right;">
+      <div style="font-size:0.7rem; color:#888; font-weight:900; margin-bottom:4px;">NIVEL ${stats.level}</div>
+      <div style="width:80px; height:6px; background:rgba(255,255,255,0.1); border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,0.05);">
+        <div style="width:${(stats.xp / getXPNeeded(stats.level) * 100).toFixed(0)}%; height:100%; background:linear-gradient(90deg, #4cd964, #aaffaa); box-shadow:0 0 10px rgba(76,217,100,0.5);"></div>
+      </div>
+    </div>
+    <button id="btn-history" class="btn-icon" style="position:absolute; top:56px; right:24px;" title="Muro de Historial" aria-label="Historial de partidas">${wallSVG}</button>
+    <button id="btn-shop" class="btn-icon${stats.extraHints > 0 ? ' btn-icon--badge' : ''}" style="position:absolute; top:56px; left:24px;" title="Tienda de Tinta" aria-label="Abrir tienda">${shopSVG}${stats.extraHints > 0 ? `<span class="shop-badge">${stats.extraHints}</span>` : ''}</button>
     <div class="title-row">${letters}</div>
-    <div class="rank-badge" title="Basado en tu Mejor Puntuación">${userRank}</div>
+    <div class="rank-badge${stats.activeTitle === 'chromatico' ? ' rank-badge--rainbow' : ''}" title="Basado en tu Mejor Puntuación">${userRank}</div>
     <div class="stats-row">
       <div class="stat"><div class="stat-val">${stats.bestScore.toFixed(2)}</div><div class="stat-lbl">Mejor</div></div>
       <div class="stat"><div class="stat-val">${stats.gamesPlayed}</div><div class="stat-lbl">Partidas</div></div>
@@ -372,16 +436,27 @@ function buildStart() {
   const stopTaglines = startTaglines();
 
   document.getElementById('btn-history').addEventListener('click', () => {
+    playClick();
     el.remove(); stopTaglines();
     buildHistory();
   });
 
-  document.getElementById('diff-chip').addEventListener('click', cycleDiff);
+  document.getElementById('btn-shop').addEventListener('click', () => {
+    playClick();
+    el.remove(); stopTaglines();
+    buildShop();
+  });
+
+  document.getElementById('diff-chip').addEventListener('click', () => {
+    playClick();
+    cycleDiff();
+  });
 
   if (isDailyLocked) {
+    let cdIv;
     const updateCd = () => {
       const cdEl = document.getElementById('daily-countdown');
-      if (!cdEl) return;
+      if (!cdEl) { clearInterval(cdIv); return; }
       const now = new Date();
       const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
       const diff = tomorrow - now;
@@ -391,7 +466,7 @@ function buildStart() {
       cdEl.textContent = `${h}:${m}:${s}`;
     };
     updateCd();
-    setInterval(updateCd, 1000);
+    cdIv = setInterval(updateCd, 1000);
   }
 
   // Card shake + fast spin on button hover
@@ -425,6 +500,7 @@ function buildStart() {
     btn.addEventListener('mouseenter', startShake);
     btn.addEventListener('mouseleave', stopShake);
     btn.addEventListener('click', () => {
+      playClick();
       document.querySelectorAll('.play').forEach(b => b.style.pointerEvents = 'none');
       stopShake();
       gsap.to(el, { x: 0, y: 0, rotation: 0, duration: 0.1 });
@@ -482,8 +558,12 @@ function buildCountdown(onDone) {
 
     const isLast = i === steps.length - 1;
 
-    if (isLast) playBeepHigh();
-    else playBeep();
+    if (isLast) {
+      playTone(880, 'sine', 0.2, 0.1);
+      setTimeout(() => playTone(1320, 'sine', 0.3, 0.1), 50);
+    } else {
+      playTone(440, 'sine', 0.1, 0.1);
+    }
 
     gsap.fromTo(we,
       { scale: isLast ? 0.3 : 0.55, opacity: 0, y: isLast ? 0 : 18 },
@@ -595,16 +675,16 @@ function buildGuess() {
   el.id = 'screen-guess';
   el.innerHTML = `
     <div class="time-bonus-wrap"><div class="time-bonus-fill" id="bonus-fill"></div></div>
-    <div class="hue-col" id="hue-col">
+    <div class="hue-col" id="hue-col" role="slider" aria-label="Tono" aria-valuemin="0" aria-valuemax="360" aria-valuenow="180" tabindex="0">
       <div class="s-thumb" id="hue-thumb" style="top:-12px"></div>
       <span class="strip-lbl">H</span>
     </div>
     <div class="sb-col">
-      <div class="sat-strip" id="sat-strip">
+      <div class="sat-strip" id="sat-strip" role="slider" aria-label="Saturación" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" tabindex="0">
         <div class="s-thumb" id="sat-thumb"></div>
         <span class="strip-lbl">S</span>
       </div>
-      <div class="bri-strip" id="bri-strip">
+      <div class="bri-strip" id="bri-strip" role="slider" aria-label="Brillo" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" tabindex="0">
         <div class="s-thumb" id="bri-thumb"></div>
         <span class="strip-lbl">B</span>
       </div>
@@ -622,7 +702,7 @@ function buildGuess() {
       <div class="hsb-val" id="hsb-val">H180 &bull; S50 &bull; B50</div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
         <button class="btn-hint" id="btn-hint" title="${G.hints > 0 ? 'Revelar el Tono correcto (1 uso)' : 'Pista agotada'}" ${G.hints > 0 ? '' : 'disabled'} style="${G.hints > 0 ? '' : 'opacity:0.3; cursor:not-allowed;'}">💡</button>
-        <button class="btn-submit pulse" id="btn-submit">&#10003;</button>
+        <button class="btn-submit pulse" id="btn-submit" aria-label="Confirmar selección">&#10003;</button>
       </div>
     </div>
   `;
@@ -680,7 +760,8 @@ function updatePicker() {
     
     box.style.backgroundColor = css;
     if (!isMobile) {
-      box.style.boxShadow = isBlind ? 'inset 0 0 20px rgba(0,0,0,0.5)' : `0 0 32px ${css}99, 0 0 80px ${css}40, inset 0 0 30px rgba(0,0,0,0.15)`;
+      // Simplificar sombras pesadas
+      box.style.boxShadow = isBlind ? 'inset 0 0 10px rgba(0,0,0,0.5)' : `0 10px 30px ${css}66`;
     }
     
     if (isBlind && !box.querySelector('.blind-icon')) {
@@ -712,9 +793,9 @@ function updatePicker() {
     if (satStrip) satStrip.style.background = `linear-gradient(to bottom, ${hsvToCss(P.h,100,P.v)}, ${hsvToCss(P.h,0,P.v)})`;
     if (briStrip) briStrip.style.background = `linear-gradient(to bottom, ${hsvToCss(P.h,P.s,100)}, ${hsvToCss(P.h,P.s,0)})`;
 
-    if (hueCol)   { const t = document.getElementById('hue-thumb'); if (t) t.style.top = `${(P.h/360)*hueCol.clientHeight-11}px`; }
-    if (satStrip) { const t = document.getElementById('sat-thumb'); if (t) t.style.top = `${((100-P.s)/100)*satStrip.clientHeight-11}px`; }
-    if (briStrip) { const t = document.getElementById('bri-thumb'); if (t) t.style.top = `${((100-P.v)/100)*briStrip.clientHeight-11}px`; }
+    if (hueCol)   { const t = document.getElementById('hue-thumb'); if (t) t.style.top = `${(P.h/360)*hueCol.clientHeight-11}px`; hueCol.setAttribute('aria-valuenow', P.h); }
+    if (satStrip) { const t = document.getElementById('sat-thumb'); if (t) t.style.top = `${((100-P.s)/100)*satStrip.clientHeight-11}px`; satStrip.setAttribute('aria-valuenow', P.s); }
+    if (briStrip) { const t = document.getElementById('bri-thumb'); if (t) t.style.top = `${((100-P.v)/100)*briStrip.clientHeight-11}px`; briStrip.setAttribute('aria-valuenow', P.v); }
 
     if (!isMobile) {
       let ambi = document.getElementById('ambilight');
@@ -763,24 +844,37 @@ function setupDrag() {
 
   drag('hue-col', 'hue-thumb', e => {
     const r = document.getElementById('hue-col').getBoundingClientRect();
+    const oldH = P.h;
     P.h = Math.round(Math.max(0, Math.min(e.clientY - r.top, r.height)) / r.height * 360) % 360;
-    updatePicker();
+    if (P.h !== oldH) {
+      playSliderSound(400 + (P.h / 360) * 400);
+      updatePicker();
+    }
   });
   drag('sat-strip', 'sat-thumb', e => {
     const r = document.getElementById('sat-strip').getBoundingClientRect();
+    const oldS = P.s;
     P.s = Math.round(100 - Math.max(0, Math.min(e.clientY - r.top, r.height)) / r.height * 100);
-    updatePicker();
+    if (P.s !== oldS) {
+      playSliderSound(300 + (P.s / 100) * 300);
+      updatePicker();
+    }
   });
   drag('bri-strip', 'bri-thumb', e => {
     const r = document.getElementById('bri-strip').getBoundingClientRect();
+    const oldV = P.v;
     P.v = Math.round(100 - Math.max(0, Math.min(e.clientY - r.top, r.height)) / r.height * 100);
-    updatePicker();
+    if (P.v !== oldV) {
+      playSliderSound(300 + (P.v / 100) * 300);
+      updatePicker();
+    }
   });
 }
 
 function submitGuess() {
   if (dragCtrl) { dragCtrl.abort(); dragCtrl = null; }
   playPop();
+  vibrate(15);
   
   const elapsed = (Date.now() - G.guessStartTime - 400) / 1000;
   gsap.killTweensOf('#bonus-fill');
@@ -856,6 +950,7 @@ function buildResult(target, guess, sc, bonusStr = '') {
       <div class="res-score-desc">${scoreDesc(sc)}</div>
       <div class="res-score-bonus" id="res-bonus">${bonusStr}</div>
     </div>
+    ${sc < 5.0 && G.hasRetry && !G.retryUsed ? `<button class="btn-retry" id="btn-retry" aria-label="Reintentar esta ronda">🔄 Segunda Oportunidad</button>` : ''}
     <button class="btn-next" id="btn-next">&#8594;</button>
   `;
   app.appendChild(el);
@@ -882,6 +977,7 @@ function buildResult(target, guess, sc, bonusStr = '') {
         gsap.fromTo(document.body, { backgroundColor: '#550000' }, { backgroundColor: '#050505', duration: 0.8, ease: 'power2.out' });
         playTone(150, 'sawtooth', 0.4, 0.2);
       } else if (sc >= 9.5) {
+        vibrate([100, 50, 100]);
         const perf = document.createElement('div');
         perf.textContent = '¡PERFECTO!';
         perf.style.cssText = 'position:absolute; top:25%; left:50%; transform:translate(-50%,-50%); font-size:3.5rem; font-weight:900; color:#fff; text-shadow:0 0 30px rgba(255,255,255,0.8); z-index:100; pointer-events:none; letter-spacing:-2px;';
@@ -907,6 +1003,22 @@ function buildResult(target, guess, sc, bonusStr = '') {
   gsap.to(numEl, { color: `hsl(${Math.round(sc*12)},75%,65%)`, delay: 1.1, duration: 0.4 });
   gsap.fromTo('#btn-next', { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, delay: 0.85, duration: 0.4, ease: 'back.out(2)' });
 
+  const btnRetry = document.getElementById('btn-retry');
+  if (btnRetry) {
+    gsap.fromTo(btnRetry, { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, delay: 1.2, duration: 0.4, ease: 'back.out(2)' });
+    btnRetry.addEventListener('click', () => {
+      btnRetry.style.pointerEvents = 'none';
+      G.retryUsed = true;
+      G.scores.pop();
+      G.guesses.pop();
+      playClick();
+      gsap.to(el, {
+        rotationY: -90, opacity: 0, duration: 0.35, ease: 'power2.in',
+        onComplete: () => { el.remove(); buildMemorize(G.colors[G.round]); }
+      });
+    }, { once: true });
+  }
+
   const btnNext = document.getElementById('btn-next');
   btnNext.addEventListener('click', () => {
     btnNext.style.pointerEvents = 'none';
@@ -915,6 +1027,7 @@ function buildResult(target, guess, sc, bonusStr = '') {
       if (sc < 7.5) {
         G.lives--;
         playTone(100, 'sawtooth', 0.5, 0.3);
+        vibrate(200);
       }
       
       gsap.to(el, {
@@ -947,20 +1060,46 @@ function buildFinal() {
   const numRounds = G.mode === 'survival' ? G.round + 1 : ROUNDS;
   const avg = G.scores.reduce((a, b) => a + b, 0) / numRounds;
   
-  const earnedInk = Math.floor(avg * numRounds + (G.combo * 5));
+  const baseInk = Math.floor(avg * numRounds + (G.combo * 5));
+  const hasInkMult = (stats.inkMultiplierGames || 0) > 0;
+  const earnedInk = hasInkMult ? Math.floor(baseInk * 1.5) : baseInk;
+  if (hasInkMult) stats.inkMultiplierGames--;
   stats.ink = (stats.ink || 0) + earnedInk;
+  
+  const hasXpMult = (stats.xpMultiplierGames || 0) > 0;
+  const earnedXP = Math.floor(avg * 10 * numRounds) * (hasXpMult ? 2 : 1);
+  if (hasXpMult) stats.xpMultiplierGames--;
+  stats.xp += earnedXP;
+  
+  let leveledUp = false;
+  while (stats.xp >= getXPNeeded(stats.level)) {
+    stats.xp -= getXPNeeded(stats.level);
+    stats.level++;
+    leveledUp = true;
+    playLevelUp();
+    vibrate([100, 50, 100, 50, 200]);
+  }
   
   stats.gamesPlayed++;
   if (avg > stats.bestScore) stats.bestScore = avg;
   
   const today = getTodayStr();
+  let shieldUsed = false;
   if (G.isDaily) {
     stats.dailyPlayed[today] = avg;
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yStr = `${yesterday.getFullYear()}-${yesterday.getMonth()+1}-${yesterday.getDate()}`;
-    if (stats.lastPlayDate === yStr) stats.streak++;
-    else if (stats.lastPlayDate !== today) stats.streak = 1;
+    if (stats.lastPlayDate === yStr) {
+      stats.streak++;
+    } else if (stats.lastPlayDate !== today) {
+      if (stats.streakShield > 0 && stats.lastPlayDate !== null) {
+        stats.streakShield--;
+        shieldUsed = true;
+      } else {
+        stats.streak = 1;
+      }
+    }
     stats.lastPlayDate = today;
   }
   
@@ -1007,9 +1146,16 @@ function buildFinal() {
 
   el.innerHTML = `
     <div class="final-eyebrow">${G.isDaily ? 'Desafío Diario' : (G.mode === 'survival' ? 'Muerte Súbita' : 'Puntuación Final')}</div>
-    <div class="ink-badge" style="margin:8px auto 0 auto;" title="Gotas de Tinta Ganadas">
-      <span class="ink-drop">💧</span> +${earnedInk} Tinta
+    <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
+      <div class="ink-badge" title="Gotas de Tinta Ganadas${hasInkMult ? ' (Multiplicador x1.5 activo)' : ''}">
+        <span class="ink-drop">💧</span> +${earnedInk}${hasInkMult ? ' <span style="color:#ffcc00;font-size:0.7rem;font-weight:900;">x1.5</span>' : ''}
+      </div>
+      <div class="ink-badge" style="border-color: rgba(76,217,100,0.3);" title="Experiencia Ganada${hasXpMult ? ' (XP x2 activo)' : ''}">
+        <span style="color:#4cd964;">✨</span> +${earnedXP} XP${hasXpMult ? ' <span style="color:#a78bfa;font-size:0.7rem;font-weight:900;">x2</span>' : ''}
+      </div>
     </div>
+    ${leveledUp ? `<div style="color:#4cd964; font-weight:900; font-size:1.4rem; margin-top:12px; text-shadow:0 0 15px rgba(76,217,100,0.5); animation: pulse 1s infinite;">¡SUBISTE AL NIVEL ${stats.level}! 🏆</div>` : ''}
+    ${shieldUsed ? `<div style="color:#60a5fa; font-size:0.82rem; font-weight:800; margin-top:8px; letter-spacing:0.5px;">🛡️ Racha Segura activada — tu racha se ha conservado</div>` : ''}
     <div class="stats-row" style="margin-top: 12px; margin-bottom: 12px; transform: scale(0.9);">
       <div class="stat"><div class="stat-val">${stats.bestScore.toFixed(2)}</div><div class="stat-lbl">Mejor</div></div>
       <div class="stat"><div class="stat-val">${stats.gamesPlayed}</div><div class="stat-lbl">Partidas</div></div>
@@ -1088,7 +1234,7 @@ function shareResult() {
   else title += ` - Práctica`;
 
   const diffName = DIFFS[diffIdx].label;
-  const avg = G.scores.reduce((a, b) => a + b, 0) / ROUNDS;
+  const avg = G.scores.reduce((a, b) => a + b, 0) / G.scores.length;
   const currentRank = getRank(avg);
   
   let text = `${title}\n${currentRank} (Dificultad: ${diffName})\n\n`;
@@ -1126,12 +1272,15 @@ function launchConfetti(score) {
   const cx    = canvas.width  / 2;
   const cy    = canvas.height * 0.55;
 
-  const pieces = Array.from({ length: count }, () => ({
+  const gameColors = (stats.premiumConfetti && G.colors?.length > 0) ? G.colors : null;
+  const pieces = Array.from({ length: count }, (_, idx) => ({
     x: cx + (Math.random()-0.5)*120, y: cy,
     vx: (Math.random()-0.5)*16,
     vy: -(Math.random()*14+7),
     r: Math.random()*5+3,
-    color: `hsl(${Math.random()*360},80%,62%)`,
+    color: gameColors
+      ? hsvToCss(gameColors[idx % gameColors.length].h, 80, 70)
+      : `hsl(${Math.random()*360},80%,62%)`,
     angle: Math.random()*360, spin: (Math.random()-0.5)*10,
     gravity: 0.32, decay: 0.985,
   }));
@@ -1190,7 +1339,7 @@ function buildHistory() {
   el.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding:0 8px;">
       <div style="font-size:1.8rem; font-weight:900; letter-spacing:-1px;">Muro de Colores</div>
-      <button id="btn-hist-close" style="background:none; border:none; color:#888; font-size:2rem; cursor:pointer; line-height:1; transition:color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#888'">&times;</button>
+      <button id="btn-hist-close" class="btn-icon-close" aria-label="Cerrar historial">&times;</button>
     </div>
     <div style="overflow-y:auto; flex:1; padding-right:8px;" class="custom-scrollbar">
       ${gridHtml}
@@ -1208,6 +1357,273 @@ function buildHistory() {
   });
 }
 
+// ── SHOP ─────────────────────────────────────────────────────────────────────
+
+const SHOP_ITEMS = [
+  {
+    id: 'extraHint',
+    name: 'Pista Extra',
+    desc: 'Añade una pista adicional a tu próxima partida. Revela el Tono (H) exacto del color.',
+    price: 50,
+    icon: '💡',
+    stat: 'extraHints',
+  },
+  {
+    id: 'extraTime',
+    name: 'Tiempo +1s',
+    desc: 'Añade 1 segundo al temporizador de memorización en tu próxima partida. Funciona en todos los modos.',
+    price: 75,
+    icon: '⏱️',
+    stat: 'extraTime',
+  },
+  {
+    id: 'extraRetry',
+    name: 'Segunda Oportunidad',
+    desc: 'Si fallas una ronda (menos de 5.0), podrás repetirla una vez. Se consume al inicio de la partida.',
+    price: 130,
+    icon: '🔄',
+    stat: 'extraRetry',
+  },
+  {
+    id: 'inkMultiplier',
+    name: 'Tinta x1.5',
+    desc: 'Gana 1.5× más Gotas de Tinta durante las próximas 5 partidas.',
+    price: 180,
+    icon: '💰',
+    stat: 'inkMultiplierGames',
+    perPurchase: 5,
+  },
+  {
+    id: 'xpMultiplier',
+    name: 'XP x2',
+    desc: 'Gana el doble de experiencia durante las próximas 3 partidas. Ideal para subir de nivel rápido.',
+    price: 220,
+    icon: '⚡',
+    stat: 'xpMultiplierGames',
+    perPurchase: 3,
+  },
+  {
+    id: 'streakShield',
+    name: 'Racha Segura',
+    desc: 'Si un día no juegas el Desafío Diario, tu racha no se romperá. Un escudo por compra.',
+    price: 150,
+    icon: '🛡️',
+    stat: 'streakShield',
+  },
+  {
+    id: 'themeForest',
+    name: 'Tema Bosque',
+    desc: 'Las partículas del fondo adoptan tonos verdes. Cosmético permanente.',
+    price: 350,
+    icon: '🌿',
+    type: 'theme',
+  },
+  {
+    id: 'themeOcean',
+    name: 'Tema Océano',
+    desc: 'Las partículas del fondo adoptan tonos azules. Cosmético permanente.',
+    price: 350,
+    icon: '🌊',
+    type: 'theme',
+  },
+  {
+    id: 'themeFire',
+    name: 'Tema Fuego',
+    desc: 'Las partículas del fondo adoptan tonos naranja y rojo. Cosmético permanente.',
+    price: 350,
+    icon: '🔥',
+    type: 'theme',
+  },
+  {
+    id: 'tintero',
+    name: 'Título: Tintero',
+    desc: 'Muestra "🖊️ Maestro Tintero" como tu rango en la pantalla principal. Permanente.',
+    price: 300,
+    icon: '🖊️',
+    type: 'title',
+    titleText: '🖊️ Maestro Tintero',
+  },
+  {
+    id: 'chromatico',
+    name: 'Título: Cromático',
+    desc: 'Muestra "🌈 Cromático Supreme" con efecto arcoiris en tu rango. Permanente.',
+    price: 500,
+    icon: '🌈',
+    type: 'title',
+    titleText: '🌈 Cromático Supreme',
+  },
+  {
+    id: 'premiumConfetti',
+    name: 'Confetti Premium',
+    desc: 'Al terminar una partida con más de 7 puntos, el confetti usará los colores exactos que jugaste. Permanente.',
+    price: 400,
+    icon: '🎊',
+    type: 'oneshot',
+    stat: 'premiumConfetti',
+  },
+];
+
+function buildShop() {
+  const el = document.createElement('div');
+  el.className = 'card shop-card';
+
+  function renderInk() { return Math.floor(stats.ink || 0); }
+
+  const itemsHtml = SHOP_ITEMS.map(item => {
+    const isTheme   = item.type === 'theme';
+    const isTitle   = item.type === 'title';
+    const isOneshot = item.type === 'oneshot';
+    const isOwned   = isTheme  ? (stats.unlockedThemes || []).includes(item.id)
+                    : isTitle  ? (stats.unlockedTitles || []).includes(item.id)
+                    : isOneshot ? !!stats[item.stat]
+                    : false;
+    const isActive  = (isTheme  && stats.activeTheme === item.id)
+                   || (isTitle  && stats.activeTitle  === item.id)
+                   || (isOneshot && !!stats[item.stat]);
+    const owned     = (!isTheme && !isTitle && !isOneshot) ? (stats[item.stat] || 0) : 0;
+    const affordable = (stats.ink || 0) >= item.price;
+
+    let btnClass = 'shop-item-btn';
+    let btnDisabled = '';
+    let btnLabel = `<span class="ink-drop">💧</span> ${item.price}`;
+
+    if (isTheme || isTitle || isOneshot) {
+      if (isActive) {
+        btnClass += ' active-theme'; btnDisabled = 'disabled';
+        btnLabel = '✓ Activo';
+      } else if (isOwned && !isOneshot) {
+        btnLabel = 'Equipar';
+      } else if (!affordable) {
+        btnClass += ' disabled'; btnDisabled = 'disabled';
+      }
+    } else if (!affordable) {
+      btnClass += ' disabled'; btnDisabled = 'disabled';
+    }
+
+    const ownedHtml = owned > 0
+      ? `<div class="shop-item-owned">${item.perPurchase ? `<strong>${owned}</strong> partidas restantes` : `Tienes: <strong>${owned}</strong>`}</div>`
+      : '';
+
+    return `
+      <div class="shop-item">
+        <div class="shop-item-icon">${item.icon}</div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">${item.name}</div>
+          <div class="shop-item-desc">${item.desc}</div>
+          ${ownedHtml}
+        </div>
+        <button
+          class="${btnClass}"
+          data-id="${item.id}"
+          data-price="${item.price}"
+          data-stat="${item.stat || ''}"
+          data-per-purchase="${item.perPurchase || 1}"
+          data-type="${item.type || 'consumable'}"
+          ${btnDisabled}
+          aria-label="${isActive ? `${item.name} activo` : `Comprar ${item.name} por ${item.price} gotas`}">
+          ${btnLabel}
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="shop-header">
+      <div class="shop-title">Tienda de Tinta</div>
+      <button id="btn-shop-close" class="btn-icon-close" aria-label="Cerrar tienda">&times;</button>
+    </div>
+    <div class="shop-wallet">
+      <span class="ink-drop">💧</span>
+      <span id="shop-ink-count">${renderInk()}</span>
+      <span style="color:#666; font-size:0.75rem; margin-left:2px;">gotas disponibles</span>
+    </div>
+    <div class="custom-scrollbar" style="overflow-y:auto; flex:1; padding-right:4px;">
+      <div id="shop-items-list">${itemsHtml}</div>
+    </div>
+  `;
+  app.appendChild(el);
+
+  gsap.fromTo(el, { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: 'power2.out' });
+
+  el.querySelectorAll('.shop-item-btn:not([disabled])').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const price       = parseInt(btn.dataset.price);
+      const stat        = btn.dataset.stat;
+      const perPurchase = parseInt(btn.dataset.perPurchase || '1');
+      const itemId      = btn.dataset.id;
+      const itemType    = btn.dataset.type;
+      const itemDef     = SHOP_ITEMS.find(i => i.id === itemId);
+
+      if (itemType === 'theme' || itemType === 'title') {
+        const unlockedKey = itemType === 'theme' ? 'unlockedThemes' : 'unlockedTitles';
+        const activeKey   = itemType === 'theme' ? 'activeTheme'    : 'activeTitle';
+        const alreadyOwned = (stats[unlockedKey] || []).includes(itemId);
+        if (!alreadyOwned) {
+          if ((stats.ink || 0) < price) return;
+          stats.ink -= price;
+          stats[unlockedKey] = [...(stats[unlockedKey] || []), itemId];
+        }
+        stats[activeKey] = itemId;
+        saveStats(); playSuccess(); vibrate(30);
+        gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
+        return;
+      }
+
+      if (itemType === 'oneshot') {
+        if ((stats.ink || 0) < price || stats[stat]) return;
+        stats.ink -= price;
+        stats[stat] = true;
+        saveStats(); playSuccess(); vibrate(30);
+        gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
+        return;
+      }
+
+      if ((stats.ink || 0) < price) return;
+      stats.ink -= price;
+      stats[stat] = (stats[stat] || 0) + perPurchase;
+      saveStats();
+      playSuccess();
+      vibrate(30);
+
+      document.getElementById('shop-ink-count').textContent = renderInk();
+
+      const origHtml = btn.innerHTML;
+      btn.innerHTML = '¡Comprado!';
+      btn.classList.add('bought');
+      gsap.fromTo(btn, { scale: 0.9 }, { scale: 1, duration: 0.25, ease: 'back.out(2)' });
+
+      setTimeout(() => {
+        btn.innerHTML = origHtml;
+        btn.classList.remove('bought');
+        if ((stats.ink || 0) < price) {
+          btn.classList.add('disabled');
+          btn.disabled = true;
+        }
+        const newOwned = stats[stat] || 0;
+        const newOwnedHtml = itemDef?.perPurchase
+          ? `<strong>${newOwned}</strong> partidas restantes`
+          : `Tienes: <strong>${newOwned}</strong>`;
+        const ownedEl = btn.closest('.shop-item').querySelector('.shop-item-owned');
+        if (ownedEl) ownedEl.innerHTML = newOwnedHtml;
+        else {
+          const info = btn.closest('.shop-item').querySelector('.shop-item-info');
+          const d = document.createElement('div');
+          d.className = 'shop-item-owned';
+          d.innerHTML = newOwnedHtml;
+          info.appendChild(d);
+        }
+      }, 1200);
+    });
+  });
+
+  document.getElementById('btn-shop-close').addEventListener('click', () => {
+    gsap.to(el, { y: 20, opacity: 0, duration: 0.2, onComplete: () => {
+      el.remove();
+      buildStart();
+    }});
+  });
+}
+
 // ── GAME FLOW ─────────────────────────────────────────────────────────────────
 
 function startGame(mode) {
@@ -1217,13 +1633,19 @@ function startGame(mode) {
     isDaily: mode === 'daily',
     seed: mode === 'challenge' ? challengeSeed : (mode === 'daily' ? getTodayStr() : Math.random().toString().substring(2, 10)),
     round: 0,
-    hints: mode === 'survival' ? 3 : 1,
+    hints: (mode === 'survival' ? 3 : 1) + (stats.extraHints > 0 ? 1 : 0),
+    hasRetry: stats.extraRetry > 0,
+    retryUsed: false,
     combo: 0,
     lives: mode === 'survival' ? 3 : null,
     colors: [],
     guesses: [], scores: [],
-    diffSecs: DIFFS[diffIdx].secs,
+    diffSecs: DIFFS[diffIdx].secs + (stats.extraTime > 0 ? 1 : 0),
   };
+
+  if (stats.extraHints > 0) { stats.extraHints--; saveStats(); }
+  if (stats.extraTime > 0)  { stats.extraTime--;  saveStats(); }
+  if (stats.extraRetry > 0) { stats.extraRetry--; saveStats(); }
 
   if (mode === 'daily') setSeed(getTodayStr());
   else if (mode === 'challenge') setSeed(challengeSeed);
@@ -1239,6 +1661,12 @@ function startGame(mode) {
 }
 
 // ── PARTICLES SYSTEM ────────────────────────────────────────────────────────
+
+const THEME_COLORS = {
+  themeForest: '#2d6a4f',
+  themeOcean:  '#0369a1',
+  themeFire:   '#ea580c',
+};
 
 const pCanvas = document.getElementById('particles-canvas');
 const pCtx = pCanvas.getContext('2d');
@@ -1261,11 +1689,20 @@ function initParticles() {
 }
 
 let lastPColorStr = '';
-function drawParticles() {
+let lastPDraw = 0;
+function drawParticles(now) {
   if (!pCanvas) return;
+  requestAnimationFrame(drawParticles);
+  
+  // Limitar a 30fps para ahorrar batería y CPU si no es necesario más
+  if (now - lastPDraw < 32) return;
+  lastPDraw = now;
+
   pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
   
-  const colorStr = pActiveColor ? hsvToCss(pActiveColor.h, pActiveColor.s, pActiveColor.v) : '#444444';
+  const colorStr = pActiveColor
+    ? hsvToCss(pActiveColor.h, pActiveColor.s, pActiveColor.v)
+    : (stats.activeTheme ? THEME_COLORS[stats.activeTheme] : '#444444');
   pCtx.fillStyle = colorStr;
   
   for (let i = 0; i < particles.length; i++) {
@@ -1282,12 +1719,7 @@ function drawParticles() {
       p.y = pCanvas.height + 10; 
       p.x = Math.random() * pCanvas.width; 
     }
-    if (p.x < -10) p.x = pCanvas.width + 10;
-    if (p.x > pCanvas.width + 10) p.x = -10;
   }
-  
-  pCtx.globalAlpha = 1;
-  requestAnimationFrame(drawParticles);
 }
 
 window.addEventListener('resize', initParticles);
