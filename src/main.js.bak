@@ -1,0 +1,576 @@
+﻿import gsap from 'gsap';
+
+// â”€â”€ Color math â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function hsvToCss(h, s, v) {
+  s /= 100; v /= 100;
+  const l = v * (1 - s / 2);
+  const sl = (l === 0 || l === 1) ? 0 : (v - l) / Math.min(l, 1 - l);
+  return `hsl(${h}, ${(sl * 100).toFixed(1)}%, ${(l * 100).toFixed(1)}%)`;
+}
+
+function hsvLabel(h, s, v) { return `H${h} S${s} B${v}`; }
+
+function randInt(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+function scoreForRound(target, guess) {
+  const dH = Math.min(Math.abs(target.h - guess.h), 360 - Math.abs(target.h - guess.h));
+  const dS = Math.abs(target.s - guess.s);
+  const dV = Math.abs(target.v - guess.v);
+  return parseFloat(Math.max(0, (1 - (dH / 180) * 0.5 - (dS / 100) * 0.25 - (dV / 100) * 0.25) * 10).toFixed(2));
+}
+
+const DESCS = [
+  [9.5, 'Â¿Eres humano? Memoria perfecta.'],
+  [8.5, 'Â¡Casi perfecto! Impresionante.'],
+  [7.5, 'Muy bien. Gran ojo para el color.'],
+  [6.5, 'Bien. Bastante cerca.'],
+  [5.0, 'Regular. MÃºsica de ascensor.'],
+  [3.0, 'Necesitas mÃ¡s prÃ¡ctica.'],
+  [0.0, 'QuizÃ¡ prueba con blanco y negro.'],
+];
+function scoreDesc(s) { return (DESCS.find(([m]) => s >= m) ?? DESCS.at(-1))[1]; }
+
+// â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+const ROUNDS = 5;
+let G = { round: 0, colors: [], guesses: [], scores: [], hard: false };
+let P = { h: 180, s: 50, v: 50 };  // picker
+let timerIv = null;
+let dragCtrl = null;
+
+const app = document.getElementById('app');
+
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function clearApp() {
+  gsap.killTweensOf('*');
+  app.innerHTML = '';
+}
+
+// â”€â”€ START SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function buildStart() {
+  const el = document.createElement('div');
+  el.className = 'card start-card';
+
+  const hues = [0, 45, 140, 200, 260];
+  const letters = 'color'.split('').map((l, i) =>
+    `<span class="title-letter" data-i="${i}">${l}</span>`
+  ).join('');
+
+  el.innerHTML = `
+    <div class="title-row">${letters}</div>
+    <p class="start-desc">
+      Los humanos no pueden recordar colores con precisiÃ³n.<br>
+      Este juego pone a prueba quÃ© tan bueno (o malo) eres en eso.<br><br>
+      Te mostraremos <strong style="color:#fff">5 colores</strong>, luego intenta recrearlos.
+    </p>
+    <hr class="start-divider"/>
+    <div class="start-section-label">Dificultad</div>
+    <div class="diff-row">
+      <div class="toggle" id="diff-toggle"></div>
+      <span class="diff-label" id="diff-label">FÃ¡cil â€” 3 segundos para memorizar</span>
+    </div>
+    <button class="btn-play" id="btn-play">Jugar â†’</button>
+  `;
+  app.appendChild(el);
+
+  // Difficulty toggle
+  document.getElementById('diff-toggle').addEventListener('click', () => {
+    G.hard = !G.hard;
+    document.getElementById('diff-toggle').classList.toggle('on', G.hard);
+    document.getElementById('diff-label').textContent = G.hard
+      ? 'DifÃ­cil â€” 2 segundos para memorizar'
+      : 'FÃ¡cil â€” 3 segundos para memorizar';
+  });
+
+  document.getElementById('btn-play').addEventListener('click', () => {
+    gsap.to(el, {
+      y: -28, opacity: 0, scale: 0.97,
+      duration: 0.3, ease: 'power2.in',
+      onComplete: () => { el.remove(); startGame(); }
+    });
+  });
+
+  // Entrance animation
+  const letEls = el.querySelectorAll('.title-letter');
+  gsap.set(letEls, { y: 70, opacity: 0 });
+  gsap.set(['.start-desc', '.start-divider', '.diff-row', '.start-section-label', '.btn-play'], { y: 18, opacity: 0 });
+
+  const tl = gsap.timeline();
+  tl.to(letEls, {
+    y: 0, opacity: 1,
+    duration: 0.55,
+    stagger: 0.07,
+    ease: 'back.out(1.8)',
+  });
+  // Color flash on letters
+  letEls.forEach((l, i) => {
+    gsap.to(l, {
+      color: `hsl(${hues[i]},85%,65%)`,
+      duration: 0.01,
+      delay: i * 0.07,
+      onComplete: () => {
+        gsap.to(l, { color: '#fff', duration: 0.5, delay: 0.15, ease: 'power2.out' });
+      }
+    });
+  });
+
+  tl.to(['.start-desc', '.start-divider', '.start-section-label', '.diff-row', '.btn-play'], {
+    y: 0, opacity: 1,
+    stagger: 0.07,
+    duration: 0.4,
+    ease: 'power2.out',
+  }, '-=0.15');
+}
+
+// â”€â”€ MEMORIZE SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function buildMemorize(color) {
+  const R = 72;
+  const C = 2 * Math.PI * R;
+  const secs = G.hard ? 2 : 3;
+
+  const el = document.createElement('div');
+  el.className = 'card mem-card';
+  el.id = 'screen-mem';
+  el.style.backgroundColor = hsvToCss(color.h, color.s, color.v);
+  el.innerHTML = `
+    <span class="mem-round">${G.round + 1} / ${ROUNDS}</span>
+    <div class="timer-wrap" id="timer-wrap">
+      <svg class="timer-svg" width="190" height="190" viewBox="0 0 190 190">
+        <circle class="ring-track" cx="95" cy="95" r="${R}"/>
+        <circle class="ring-fill" id="ring-fill" cx="95" cy="95" r="${R}"
+          stroke-dasharray="${C.toFixed(2)}"
+          stroke-dashoffset="0"/>
+      </svg>
+      <div class="timer-inner">
+        <div class="timer-num" id="timer-num">${secs}</div>
+        <div class="timer-label">seg. para recordar</div>
+      </div>
+    </div>
+    <span class="mem-brand">Color Memory</span>
+  `;
+  app.appendChild(el);
+
+  // Circular entrance
+  gsap.fromTo(el,
+    { clipPath: 'circle(0% at 50% 50%)', opacity: 0.6 },
+    {
+      clipPath: 'circle(150% at 50% 50%)', opacity: 1,
+      duration: 0.6, ease: 'power2.out',
+      onComplete: () => { el.style.clipPath = ''; }
+    }
+  );
+  gsap.fromTo('#timer-wrap',
+    { scale: 0.6, opacity: 0 },
+    { scale: 1, opacity: 1, delay: 0.25, duration: 0.5, ease: 'back.out(1.7)' }
+  );
+
+  // Breathing glow
+  const glowTween = gsap.to(el, {
+    boxShadow: `0 0 80px ${hsvToCss(color.h, color.s, color.v)}60, 0 40px 100px rgba(0,0,0,0.7)`,
+    repeat: -1, yoyo: true, duration: 1.2, ease: 'sine.inOut',
+  });
+
+  // Ring depletion
+  gsap.to('#ring-fill', {
+    strokeDashoffset: C, duration: secs, ease: 'none',
+  });
+
+  // Number countdown
+  let remaining = secs;
+  timerIv = setInterval(() => {
+    remaining--;
+    const numEl = document.getElementById('timer-num');
+    if (!numEl) return;
+    numEl.textContent = remaining;
+    gsap.fromTo(numEl,
+      { scale: 1.5, opacity: 0.6 },
+      { scale: 1, opacity: 1, duration: 0.4, ease: 'back.out(1.5)' }
+    );
+    if (remaining <= 0) {
+      clearInterval(timerIv);
+      glowTween.kill();
+      gsap.to(el, {
+        y: -32, opacity: 0, scale: 0.95,
+        duration: 0.35, ease: 'power2.in',
+        onComplete: () => { el.remove(); buildGuess(); }
+      });
+    }
+  }, 1000);
+}
+
+// â”€â”€ GUESS SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function buildGuess() {
+  P = { h: 180, s: 50, v: 50 };
+
+  const el = document.createElement('div');
+  el.className = 'card guess-card';
+  el.id = 'screen-guess';
+  el.innerHTML = `
+    <div class="hue-col" id="hue-col">
+      <div class="s-thumb" id="hue-thumb" style="top:-11px"></div>
+    </div>
+    <div class="sb-col">
+      <div class="sat-strip" id="sat-strip">
+        <div class="s-thumb" id="sat-thumb"></div>
+      </div>
+      <div class="bri-strip" id="bri-strip">
+        <div class="s-thumb" id="bri-thumb"></div>
+      </div>
+    </div>
+    <div class="preview-col">
+      <div class="guess-header">
+        <span>${G.round + 1} / ${ROUNDS}</span>
+        <span>Color Memory</span>
+      </div>
+      <div class="preview-box" id="preview-box">
+        <div class="preview-shine"></div>
+      </div>
+      <div class="hsb-val" id="hsb-val">H180 S50 B50</div>
+      <button class="btn-submit pulse" id="btn-submit">âœ“</button>
+    </div>
+  `;
+  app.appendChild(el);
+
+  // Force layout before reading heights
+  requestAnimationFrame(() => {
+    updatePicker();
+    setupDrag(el);
+  });
+
+  // Entrance
+  gsap.fromTo(el, { x: 48, opacity: 0 }, { x: 0, opacity: 1, duration: 0.4, ease: 'power2.out' });
+  gsap.fromTo('#btn-submit', { scale: 0 }, { scale: 1, delay: 0.25, duration: 0.5, ease: 'back.out(2)' });
+
+  document.getElementById('btn-submit').addEventListener('click', submitGuess);
+}
+
+function updatePicker() {
+  const box = document.getElementById('preview-box');
+  const hsbEl = document.getElementById('hsb-val');
+  const satStrip = document.getElementById('sat-strip');
+  const briStrip = document.getElementById('bri-strip');
+  const hueCol  = document.getElementById('hue-col');
+  if (!box) return;
+
+  const css = hsvToCss(P.h, P.s, P.v);
+  box.style.backgroundColor = css;
+  box.style.boxShadow = `0 0 24px ${css}90, 0 0 60px ${css}30`;
+  if (hsbEl) hsbEl.textContent = hsvLabel(P.h, P.s, P.v);
+
+  if (satStrip) satStrip.style.background =
+    `linear-gradient(to bottom, ${hsvToCss(P.h,100,P.v)}, ${hsvToCss(P.h,0,P.v)})`;
+  if (briStrip) briStrip.style.background =
+    `linear-gradient(to bottom, ${hsvToCss(P.h,P.s,100)}, ${hsvToCss(P.h,P.s,0)})`;
+
+  if (hueCol) {
+    const ht = document.getElementById('hue-thumb');
+    if (ht) ht.style.top = `${(P.h / 360) * hueCol.clientHeight - 11}px`;
+  }
+  if (satStrip) {
+    const st = document.getElementById('sat-thumb');
+    if (st) st.style.top = `${((100 - P.s) / 100) * satStrip.clientHeight - 11}px`;
+  }
+  if (briStrip) {
+    const bt = document.getElementById('bri-thumb');
+    if (bt) bt.style.top = `${((100 - P.v) / 100) * briStrip.clientHeight - 11}px`;
+  }
+}
+
+function setupDrag() {
+  if (dragCtrl) dragCtrl.abort();
+  dragCtrl = new AbortController();
+  const sig = dragCtrl.signal;
+
+  function drag(elId, onMove) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    let active = false;
+    el.addEventListener('mousedown', e => { active = true; onMove(e); }, { signal: sig });
+    el.addEventListener('touchstart', e => { active = true; onMove(e.touches[0]); }, { passive: true, signal: sig });
+    window.addEventListener('mousemove', e => { if (active) onMove(e); }, { signal: sig });
+    window.addEventListener('touchmove', e => { if (active) onMove(e.touches[0]); }, { passive: true, signal: sig });
+    window.addEventListener('mouseup', () => active = false, { signal: sig });
+    window.addEventListener('touchend', () => active = false, { signal: sig });
+  }
+
+  drag('hue-col', e => {
+    const col = document.getElementById('hue-col');
+    const r = col.getBoundingClientRect();
+    P.h = Math.round(Math.max(0, Math.min(e.clientY - r.top, r.height)) / r.height * 360) % 360;
+    updatePicker();
+  });
+  drag('sat-strip', e => {
+    const s = document.getElementById('sat-strip');
+    const r = s.getBoundingClientRect();
+    P.s = Math.round(100 - Math.max(0, Math.min(e.clientY - r.top, r.height)) / r.height * 100);
+    updatePicker();
+  });
+  drag('bri-strip', e => {
+    const b = document.getElementById('bri-strip');
+    const r = b.getBoundingClientRect();
+    P.v = Math.round(100 - Math.max(0, Math.min(e.clientY - r.top, r.height)) / r.height * 100);
+    updatePicker();
+  });
+}
+
+function submitGuess() {
+  if (dragCtrl) { dragCtrl.abort(); dragCtrl = null; }
+
+  const guess = { ...P };
+  G.guesses.push(guess);
+  const target = G.colors[G.round];
+  const sc = scoreForRound(target, guess);
+  G.scores.push(sc);
+
+  const el = document.getElementById('screen-guess');
+  const btn = document.getElementById('btn-submit');
+
+  // Satisfying submit animation
+  const tl = gsap.timeline();
+  tl.to(btn, { scale: 1.5, duration: 0.12, ease: 'power2.out' })
+    .to(btn, { scale: 0.85, duration: 0.1 })
+    .to(btn, { scale: 1.1, duration: 0.12 })
+    .to(el, {
+      x: -36, opacity: 0, duration: 0.32, ease: 'power2.in', delay: 0.05,
+      onComplete: () => { el.remove(); buildResult(target, guess, sc); }
+    });
+}
+
+// â”€â”€ RESULT SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function buildResult(target, guess, sc) {
+  const topCss = hsvToCss(guess.h, guess.s, guess.v);
+  const botCss = hsvToCss(target.h, target.s, target.v);
+
+  const el = document.createElement('div');
+  el.className = 'card result-card';
+  el.id = 'screen-result';
+  el.innerHTML = `
+    <div class="res-half res-top" id="res-top" style="background:${topCss}">
+      <div>
+        <div class="res-color-label">Tu selecciÃ³n</div>
+        <div class="res-color-val">${hsvLabel(guess.h, guess.s, guess.v)}</div>
+      </div>
+    </div>
+    <div class="res-half res-bot" id="res-bot" style="background:${botCss}">
+      <div>
+        <div class="res-color-label">Original</div>
+        <div class="res-color-val">${hsvLabel(target.h, target.s, target.v)}</div>
+      </div>
+    </div>
+    <div class="res-score-pill" id="score-pill">
+      <div class="res-score-big" id="res-num">0.00</div>
+      <div class="res-score-desc">${scoreDesc(sc)}</div>
+    </div>
+    <button class="btn-next" id="btn-next">â†’</button>
+  `;
+  app.appendChild(el);
+
+  // Halves slam from top and bottom
+  gsap.fromTo('#res-top', { y: '-100%' }, { y: 0, duration: 0.55, ease: 'power3.out' });
+  gsap.fromTo('#res-bot', { y: '100%' },  { y: 0, duration: 0.55, ease: 'power3.out' });
+
+  // Score pill pop
+  gsap.fromTo('#score-pill',
+    { scale: 0.4, opacity: 0 },
+    { scale: 1, opacity: 1, delay: 0.35, duration: 0.5, ease: 'back.out(2)' }
+  );
+
+  // Count-up score
+  const counter = { value: 0 };
+  const numEl = document.getElementById('res-num');
+  gsap.to(counter, {
+    value: sc, delay: 0.35, duration: 0.9, ease: 'power2.out',
+    onUpdate() { numEl.textContent = counter.value.toFixed(2); }
+  });
+
+  // Color score number based on score
+  const hue = Math.round(sc * 12); // 0â†’red, 120â†’green
+  gsap.to(numEl, { color: `hsl(${hue},75%,65%)`, delay: 1.1, duration: 0.4 });
+
+  // Next button
+  gsap.fromTo('#btn-next',
+    { scale: 0, opacity: 0 },
+    { scale: 1, opacity: 1, delay: 0.85, duration: 0.4, ease: 'back.out(2)' }
+  );
+
+  document.getElementById('btn-next').addEventListener('click', () => {
+    G.round++;
+    gsap.to(el, {
+      opacity: 0, scale: 0.94, duration: 0.28, ease: 'power2.in',
+      onComplete: () => {
+        el.remove();
+        G.round >= ROUNDS ? buildFinal() : buildMemorize(G.colors[G.round]);
+      }
+    });
+  });
+}
+
+// â”€â”€ FINAL SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function buildFinal() {
+  const avg = G.scores.reduce((a, b) => a + b, 0) / ROUNDS;
+  const R = 66;
+  const C = 2 * Math.PI * R;
+  const frac = avg / 10;
+  const hue = Math.round(frac * 120);
+
+  const el = document.createElement('div');
+  el.className = 'card final-card';
+  el.id = 'screen-final';
+
+  const recap = G.colors.map((t, i) => {
+    const g = G.guesses[i];
+    const sc = G.scores[i];
+    const sc10 = sc * 10;
+    const h = Math.round(sc10 * 12);
+    return `
+      <div class="recap-row">
+        <div class="recap-swatches">
+          <div class="recap-swatch" style="background:${hsvToCss(g.h,g.s,g.v)}" title="Tu color"></div>
+          <div class="recap-swatch" style="background:${hsvToCss(t.h,t.s,t.v)}" title="Original"></div>
+        </div>
+        <div class="recap-info">
+          <strong>Ronda ${i + 1}</strong>
+          ${hsvLabel(g.h,g.s,g.v)} â†’ ${hsvLabel(t.h,t.s,t.v)}
+        </div>
+        <div class="recap-sc" style="color:hsl(${h},70%,65%)">${sc.toFixed(2)}</div>
+      </div>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="final-eyebrow">PuntuaciÃ³n Final</div>
+    <div class="ring-wrap">
+      <svg class="score-ring-svg" width="150" height="150" viewBox="0 0 150 150">
+        <circle class="score-ring-bg" cx="75" cy="75" r="${R}"/>
+        <circle class="score-ring-fg" id="score-ring" cx="75" cy="75" r="${R}"
+          stroke-dasharray="${C.toFixed(2)}"
+          stroke-dashoffset="${C.toFixed(2)}"
+          stroke="hsl(${hue},70%,65%)"/>
+      </svg>
+      <div class="ring-num" id="final-num">0</div>
+    </div>
+    <div class="final-desc">${scoreDesc(avg)}</div>
+    <div class="recap-list">${recap}</div>
+    <button class="btn-replay" id="btn-replay">Jugar de nuevo â†’</button>
+  `;
+  app.appendChild(el);
+
+  // Entrance
+  gsap.fromTo(el, { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: 'power2.out' });
+
+  // Ring fill
+  gsap.to('#score-ring', {
+    strokeDashoffset: C * (1 - frac), delay: 0.3, duration: 1.6, ease: 'power2.out'
+  });
+
+  // Count up final score
+  const counter = { value: 0 };
+  const numEl = document.getElementById('final-num');
+  gsap.to(counter, {
+    value: avg, delay: 0.3, duration: 1.6, ease: 'power2.out',
+    onUpdate() { numEl.textContent = counter.value.toFixed(2); }
+  });
+  gsap.to(numEl, { color: `hsl(${hue},70%,65%)`, delay: 1.6, duration: 0.4 });
+
+  // Stagger recap rows
+  const rows = el.querySelectorAll('.recap-row');
+  gsap.set(rows, { x: 32, opacity: 0 });
+  gsap.to(rows, {
+    x: 0, opacity: 1,
+    stagger: 0.08,
+    delay: 0.5,
+    duration: 0.4,
+    ease: 'power2.out',
+  });
+
+  // Replay button
+  gsap.set('#btn-replay', { y: 16, opacity: 0 });
+  gsap.to('#btn-replay', { y: 0, opacity: 1, delay: 1.1, duration: 0.4, ease: 'back.out(1.5)' });
+
+  if (avg >= 7) launchConfetti(avg);
+
+  document.getElementById('btn-replay').addEventListener('click', () => {
+    gsap.to(el, {
+      y: -28, opacity: 0, duration: 0.3, ease: 'power2.in',
+      onComplete: () => { el.remove(); buildStart(); }
+    });
+  });
+}
+
+// â”€â”€ CONFETTI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function launchConfetti(score) {
+  const canvas = document.getElementById('confetti-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const count = Math.floor(score * 20 + 40);
+  const cx = canvas.width / 2;
+  const cy = canvas.height * 0.55;
+
+  const pieces = Array.from({ length: count }, () => ({
+    x: cx + (Math.random() - 0.5) * 120,
+    y: cy,
+    vx: (Math.random() - 0.5) * 16,
+    vy: -(Math.random() * 14 + 7),
+    r: Math.random() * 5 + 3,
+    color: `hsl(${Math.random() * 360},80%,62%)`,
+    angle: Math.random() * 360,
+    spin: (Math.random() - 0.5) * 10,
+    gravity: 0.32,
+    decay: 0.985,
+  }));
+
+  let raf;
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let alive = false;
+    for (const p of pieces) {
+      p.vy += p.gravity;
+      p.vx *= p.decay;
+      p.vy *= p.decay;
+      p.x += p.vx; p.y += p.vy;
+      p.angle += p.spin;
+      if (p.y < canvas.height + 20) alive = true;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle * Math.PI / 180);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.r, -p.r * 0.5, p.r * 2, p.r);
+      ctx.restore();
+    }
+    if (alive) raf = requestAnimationFrame(draw);
+    else ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  draw();
+}
+
+// â”€â”€ GAME FLOW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function startGame() {
+  G = {
+    round: 0,
+    colors: Array.from({ length: ROUNDS }, () => ({
+      h: randInt(0, 359),
+      s: randInt(40, 100),
+      v: randInt(22, 82),
+    })),
+    guesses: [],
+    scores: [],
+    hard: G.hard,
+  };
+  buildMemorize(G.colors[0]);
+}
+
+// â”€â”€ INIT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+buildStart();
+
