@@ -395,6 +395,10 @@ body {
 .btn-icon-close:hover { color: #fff; }
 
 /* ── RESPONSIVE: MOBILE ───────────────────────── */
+@media (max-width: 768px) {
+  .btn-mute { display: none; }
+}
+
 @media (max-width: 540px) {
   :root { --card-w: 100vw; }
   body { align-items: flex-start; }
@@ -410,19 +414,21 @@ body {
     padding: 24px;
     display: flex; flex-direction: column; justify-content: center;
   }
-  .title-letter { font-size: 3.6rem; }
+  .title-letter { font-size: 3.2rem; }
 
   .countdown-card, .mem-card, .guess-card, .result-card, .history-card {
     height: 100vh; height: 100dvh; border-radius: 0; border: none;
   }
 
-  .hue-col { width: 56px; }
-  .sb-col  { width: 52px; }
-  .s-thumb { width: 30px; height: 30px; }
+  /* Ajustes para mejor control táctil en móviles */
+  .hue-col { width: 64px; }
+  .sb-col  { width: 60px; }
+  .s-thumb { width: 34px; height: 34px; }
 
-  .action-btn { width: 58px; height: 58px; }
-  .diff-chip-modern { height: 58px; min-width: 90px; padding: 10px 14px; }
-  .ring-btn   { width: 58px; height: 58px; }
+  .action-btn { width: 60px; height: 60px; }
+  .diff-chip-modern { height: 60px; min-width: 90px; padding: 8px 12px; }
+  .ring-btn   { width: 60px; height: 60px; }
+  .action-grid-modern { gap: 10px; margin-top: 15px; }
 
   .final-card { padding: 40px 24px 30px; }
   .history-card { padding: 40px 16px; border: none !important; border-radius: 0 !important; max-height: 100dvh !important; }
