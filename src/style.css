@@ -400,29 +400,24 @@ body {
 }
 
 @media (max-width: 540px) {
-  :root { --card-w: 92vw; }
-  body { align-items: center; }
-  #app { width: var(--card-w); max-width: 92vw; margin: 0 auto; }
+  :root { --card-w: 100vw; }
+  body { align-items: flex-start; }
+  #app { width: 100%; max-width: 100%; }
 
   .card {
-    border-radius: 24px; width: 100%;
-    min-height: auto;
-    max-height: 94vh; max-height: 94dvh;
-    border: 1px solid rgba(255,255,255,0.1);
-    background: rgba(17, 17, 17, 0.85);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    border-radius: 0; width: 100%;
+    min-height: 100vh; min-height: 100dvh;
+    border: none;
   }
 
   .start-card { 
-    padding: 32px 24px;
+    padding: 24px;
     display: flex; flex-direction: column; justify-content: center;
   }
   .title-letter { font-size: 3.2rem; }
 
   .countdown-card, .mem-card, .guess-card, .result-card, .history-card {
-    height: 94vh; height: 94dvh; border-radius: 24px;
+    height: 100vh; height: 100dvh; border-radius: 0; border: none;
   }
 
   /* Ajustes para mejor control táctil en móviles */
