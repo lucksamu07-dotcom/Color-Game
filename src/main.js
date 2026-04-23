@@ -142,13 +142,6 @@ if (!stats.unlockedTitles) stats.unlockedTitles = [];
 if (stats.activeTitle === undefined) stats.activeTitle = null;
 if (stats.premiumConfetti === undefined) stats.premiumConfetti = false;
 
-// 🎁 REGALO: 20,000 gotas para probar la tienda
-if ((stats.ink || 0) < 20000) {
-  stats.ink = 20000;
-  saveStats();
-}
-
-
 function getXPNeeded(lvl) { return Math.floor(100 * Math.pow(lvl, 1.5)); }
 
 function saveStats() {
