@@ -39,57 +39,150 @@ function playPop() {
   if (!audioCtx) initAudio();
   if (!audioCtx) return;
   if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.frequency.setValueAtTime(600, audioCtx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.15);
-  gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + 0.15);
+  const t = audioCtx.currentTime;
+  const thud = audioCtx.createOscillator();
+  const thudGain = audioCtx.createGain();
+  thud.frequency.setValueAtTime(160, t);
+  thud.frequency.exponentialRampToValueAtTime(50, t + 0.13);
+  thudGain.gain.setValueAtTime(0.44, t);
+  thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+  thud.connect(thudGain); thudGain.connect(audioCtx.destination);
+  thud.start(t); thud.stop(t + 0.15);
+  const click = audioCtx.createOscillator();
+  const clickGain = audioCtx.createGain();
+  click.type = 'square';
+  click.frequency.setValueAtTime(1100, t);
+  click.frequency.exponentialRampToValueAtTime(200, t + 0.05);
+  clickGain.gain.setValueAtTime(0.09, t);
+  clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  click.connect(clickGain); clickGain.connect(audioCtx.destination);
+  click.start(t); click.stop(t + 0.05);
 }
 
 function playBeep() { playTone(600, 'square', 0.1, 0.05); }
 function playBeepHigh() { playTone(880, 'square', 0.15, 0.05); }
 
 function playReveal(score) {
+  if (isMuted) return;
+  if (!audioCtx) initAudio();
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  const t = audioCtx.currentTime;
   if (score >= 9.5) {
-    // Acorde Mayor 7 brillante
-    [440, 554.37, 659.25, 830.61].forEach((f, i) => {
-      setTimeout(() => playTone(f, 'sine', 1.2, 0.1), i * 60);
+    const sweep = audioCtx.createOscillator();
+    const sweepGain = audioCtx.createGain();
+    sweep.frequency.setValueAtTime(220, t);
+    sweep.frequency.exponentialRampToValueAtTime(880, t + 0.32);
+    sweepGain.gain.setValueAtTime(0.07, t);
+    sweepGain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+    sweep.connect(sweepGain); sweepGain.connect(audioCtx.destination);
+    sweep.start(t); sweep.stop(t + 0.32);
+    [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => {
+      setTimeout(() => playTone(f, 'sine', 1.8, 0.13), 330 + i * 65);
     });
   } else if (score >= 8.0) {
-    // Acorde Mayor
     [440, 554.37, 659.25].forEach((f, i) => {
-      setTimeout(() => playTone(f, 'sine', 0.8, 0.1), i * 50);
+      setTimeout(() => playTone(f, 'sine', 1.1, 0.11), i * 55);
     });
+  } else if (score >= 6.0) {
+    playTone(440, 'triangle', 0.35, 0.09);
+    setTimeout(() => playTone(554.37, 'triangle', 0.45, 0.09), 85);
   } else if (score < 4.0) {
-    // Sonido de fallo dramático
-    playTone(180, 'sawtooth', 0.4, 0.15);
-    setTimeout(() => playTone(140, 'sawtooth', 0.6, 0.15), 150);
+    playTone(200, 'sawtooth', 0.12, 0.18);
+    setTimeout(() => playTone(160, 'sawtooth', 0.45, 0.18), 130);
+    setTimeout(() => playTone(110, 'sawtooth', 0.65, 0.18), 290);
   } else {
-    // Sonido neutro/bien
-    playTone(440, 'triangle', 0.15, 0.1);
-    setTimeout(() => playTone(523.25, 'triangle', 0.25, 0.1), 100);
+    playTone(440, 'triangle', 0.18, 0.1);
+    setTimeout(() => playTone(523.25, 'triangle', 0.28, 0.09), 95);
   }
 }
 
 function playLevelUp() {
-  const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+  const notes = [392, 493.88, 523.25, 659.25, 783.99, 1046.50];
   notes.forEach((freq, i) => {
-    setTimeout(() => playTone(freq, 'sine', 0.4, 0.1), i * 150);
+    setTimeout(() => playTone(freq, 'sine', 0.55, 0.12), i * 110);
   });
+  setTimeout(() => {
+    [523.25, 659.25, 783.99].forEach(f => playTone(f, 'sine', 1.0, 0.09));
+  }, notes.length * 110 + 40);
 }
 
 function playClick() {
-  playTone(800, 'sine', 0.05, 0.05);
+  if (isMuted) return;
+  if (!audioCtx) initAudio();
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.frequency.setValueAtTime(1400, t);
+  osc.frequency.exponentialRampToValueAtTime(500, t + 0.04);
+  gain.gain.setValueAtTime(0.07, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.04);
 }
 
 function playSuccess() {
-  playTone(523.25, 'sine', 0.1, 0.1);
-  setTimeout(() => playTone(659.25, 'sine', 0.15, 0.1), 80);
+  [523.25, 659.25, 783.99].forEach((f, i) => {
+    setTimeout(() => playTone(f, 'sine', 0.3, 0.1), i * 65);
+  });
+}
+
+function playStartJingle(mode) {
+  const themes = {
+    daily: [392, 523.25, 659.25, 783.99],
+    survival: [220, 329.63, 440, 659.25],
+    practice: [329.63, 392, 493.88, 659.25],
+    challenge: [293.66, 440, 587.33, 880],
+  };
+  const notes = themes[mode] || themes.practice;
+  notes.forEach((freq, i) => {
+    setTimeout(() => playTone(freq, i === notes.length - 1 ? 'triangle' : 'sine', 0.22 + i * 0.03, 0.08), i * 58);
+  });
+}
+
+function playColorReveal(color) {
+  const base = 220 + (color.h / 360) * 440;
+  playTone(base, 'sine', 0.24, 0.055);
+  setTimeout(() => playTone(base * (1 + color.s / 220), 'triangle', 0.18, 0.035), 45);
+}
+
+function playAwardPop(i = 0) {
+  const base = 520 + i * 85;
+  playTone(base, 'triangle', 0.14, 0.05);
+  setTimeout(() => playTone(base * 1.5, 'sine', 0.16, 0.04), 45);
+}
+
+function playSwish() {
+  if (isMuted) return;
+  if (!audioCtx) initAudio();
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  const t = audioCtx.currentTime;
+  const dur = 0.17;
+  const buf = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * dur), audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.frequency.setValueAtTime(3500, t);
+  filt.frequency.exponentialRampToValueAtTime(350, t + dur);
+  filt.Q.value = 0.9;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.065, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(filt); filt.connect(gain); gain.connect(audioCtx.destination);
+  src.start(t); src.stop(t + dur);
+}
+
+function playCombo(n) {
+  const base = Math.min(880, 440 * Math.pow(1.14, n - 2));
+  playTone(base, 'sine', 0.18, 0.09);
+  setTimeout(() => playTone(base * 1.26, 'sine', 0.22, 0.09), 70);
+  if (n >= 4) setTimeout(() => playTone(base * 1.587, 'sine', 0.28, 0.09), 140);
 }
 
 let lastSlideTime = 0;
@@ -176,6 +269,8 @@ function clearSeed() { currentRandom = Math.random; }
 // ── Color math ──────────────────────────────────────────────────────────────
 
 const isMobile = window.matchMedia('(max-width: 768px)').matches;
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const lowPowerMode = prefersReducedMotion;
 
 function hsvToCss(h, s, v) {
   s /= 100; v /= 100;
@@ -255,6 +350,65 @@ const RANKS = [
 ];
 function getRank(s) { return (RANKS.find(([m]) => s >= m) ?? RANKS.at(-1))[1]; }
 
+function hueDelta(a, b) {
+  return Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+}
+
+function clamp01(n) {
+  return Math.max(0, Math.min(1, n));
+}
+
+function getRoundBreakdown(target, guess) {
+  const hDiff = hueDelta(target.h, guess.h);
+  const sDiff = Math.abs(target.s - guess.s);
+  const vDiff = Math.abs(target.v - guess.v);
+  return [
+    { label: 'Tono', short: 'H', diff: `${Math.round(hDiff)} deg`, score: clamp01(1 - hDiff / 180) },
+    { label: 'Saturacion', short: 'S', diff: `${sDiff}`, score: clamp01(1 - sDiff / 100) },
+    { label: 'Brillo', short: 'B', diff: `${vDiff}`, score: clamp01(1 - vDiff / 100) },
+  ];
+}
+
+function getRoundTip(parts) {
+  const weakest = [...parts].sort((a, b) => a.score - b.score)[0];
+  if (!weakest || weakest.score > 0.86) return 'Muy fino: pequenos matices te separan del 10.';
+  if (weakest.short === 'H') return 'Tu memoria fallo mas en el tono.';
+  if (weakest.short === 'S') return 'La saturacion fue lo que mas se alejo.';
+  return 'El brillo fue el mayor desvio.';
+}
+
+function getDailyPalette(seedStr) {
+  let hash = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    hash = Math.imul(31, hash) + seedStr.charCodeAt(i) | 0;
+  }
+  const rand = mulberry32(hash);
+  return Array.from({ length: 5 }, () => ({
+    h: Math.floor(rand() * 360),
+    s: Math.floor(55 + rand() * 40),
+    v: Math.floor(45 + rand() * 40),
+  }));
+}
+
+function getDailyFocus(playedToday) {
+  if (playedToday >= 9) return { done: true, title: 'Perfecto diario', sub: 'Hoy ya dejaste una marca dificil de superar.' };
+  if (playedToday >= 7) return { done: true, title: 'Racha caliente', sub: `Diario completado con ${playedToday.toFixed(2)}.` };
+  if (stats.streak >= 3) return { done: false, title: 'Defiende la racha', sub: `${stats.streak} dias seguidos. El diario te espera.` };
+  if ((stats.bestScore || 0) >= 8) return { done: false, title: 'Busca el 9+', sub: 'Un color perfecto puede cambiar la partida.' };
+  return { done: false, title: 'Objetivo 7.00', sub: 'Supera la media y gana ritmo de recompensas.' };
+}
+
+function getSessionAwards(avg, perfects, bestRound, numRounds) {
+  const awards = [];
+  if (bestRound >= 9.5) awards.push({ tone: 'gold', label: 'Color perfecto', value: `${bestRound.toFixed(2)}` });
+  if (perfects >= 2) awards.push({ tone: 'rainbow', label: 'Doble acierto', value: `${perfects} rondas` });
+  if (avg >= 8.5) awards.push({ tone: 'green', label: 'Ojo fino', value: `${avg.toFixed(2)}` });
+  if (G.combo >= 2) awards.push({ tone: 'fire', label: 'Combo vivo', value: `x${G.combo}` });
+  if (G.mode === 'survival' && numRounds >= 8) awards.push({ tone: 'blue', label: 'Superviviente', value: `${numRounds} rondas` });
+  if (!awards.length) awards.push({ tone: 'dim', label: 'Siguiente meta', value: '+7.00' });
+  return awards;
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const ROUNDS = 5;
@@ -284,6 +438,7 @@ let taglineIv = null;
 let dragCtrl  = null;
 let diffIdx   = 0;
 let pickerUpdatePending = false;
+let lastPickerPaint = { h: null, s: null, v: null, blind: null };
 
 // -- URL Challenge parsing --
 const urlParams = new URLSearchParams(window.location.search);
@@ -326,6 +481,65 @@ function cycleDiff() {
     dot.classList.toggle('on', i <= diffIdx);
   });
   gsap.fromTo('#diff-chip', { scale: 0.92 }, { scale: 1, duration: 0.3, ease: 'back.out(2.5)' });
+}
+
+// ── HOME BUTTON & QUIT CONFIRM ────────────────────────────────────────────────
+
+let homeBtn = null;
+
+function showHomeBtn() {
+  if (homeBtn) return;
+  homeBtn = document.createElement('button');
+  homeBtn.className = 'btn-home-game';
+  homeBtn.setAttribute('aria-label', 'Volver al menú principal');
+  homeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
+  document.body.appendChild(homeBtn);
+  gsap.fromTo(homeBtn, { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.35, ease: 'back.out(2.2)' });
+  homeBtn.addEventListener('click', showQuitConfirm);
+}
+
+function hideHomeBtn() {
+  if (!homeBtn) return;
+  const btn = homeBtn;
+  homeBtn = null;
+  gsap.to(btn, { scale: 0, opacity: 0, duration: 0.2, ease: 'power2.in', onComplete: () => btn.remove() });
+}
+
+function showQuitConfirm() {
+  playClick();
+  const overlay = document.createElement('div');
+  overlay.className = 'quit-overlay';
+  overlay.innerHTML = `
+    <div class="quit-dialog" id="quit-dialog">
+      <div class="quit-title">¿Salir?</div>
+      <div class="quit-sub">Perderás el progreso<br>de esta partida</div>
+      <div class="quit-btns">
+        <button class="quit-btn-yes" id="quit-yes">Salir al menú</button>
+        <button class="quit-btn-no"  id="quit-no">Seguir jugando</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.18 });
+  gsap.fromTo('#quit-dialog', { scale: 0.85, opacity: 0, y: 20 }, { scale: 1, opacity: 1, y: 0, duration: 0.32, ease: 'back.out(2)' });
+
+  document.getElementById('quit-no').addEventListener('click', () => {
+    playClick();
+    gsap.to(overlay, { opacity: 0, duration: 0.18, onComplete: () => overlay.remove() });
+  });
+
+  document.getElementById('quit-yes').addEventListener('click', () => {
+    if (timerIv !== null) { clearInterval(timerIv); timerIv = null; }
+    if (dragCtrl) { dragCtrl.abort(); dragCtrl = null; }
+    gsap.killTweensOf('*');
+    app.innerHTML = '';
+    const ambi = document.getElementById('ambilight');
+    if (ambi) ambi.remove();
+    document.querySelector('.combo-popup')?.remove();
+    overlay.remove();
+    hideHomeBtn();
+    buildStart();
+  });
 }
 
 // ── START SCREEN ─────────────────────────────────────────────────────────────
@@ -375,6 +589,11 @@ function buildStart() {
   const activeTitleItem = stats.activeTitle ? SHOP_ITEMS.find(i => i.id === stats.activeTitle) : null;
   const userRank = activeTitleItem?.titleText || (stats.gamesPlayed > 0 ? getRank(stats.bestScore) : '🌱 Novato');
   const activePowerUps = ['extraHints','extraTime','extraRetry','inkMultiplierGames','xpMultiplierGames','streakShield'].filter(k => (stats[k] || 0) > 0).length;
+  const dailyPalette = getDailyPalette(today);
+  const focus = getDailyFocus(playedToday);
+  const dailyPaletteHtml = dailyPalette
+    .map(c => `<span class="daily-palette-swatch" style="background:${hsvToCss(c.h, c.s, c.v)}"></span>`)
+    .join('');
   
   // Novedad: El modo diario se bloquea a un solo intento solo si el jugador ya conoce el juego (>5 partidas)
   const isDailyLocked = (stats.gamesPlayed >= 5) && (playedToday !== undefined);
@@ -392,11 +611,17 @@ function buildStart() {
     <button id="btn-history" class="btn-icon" style="position:absolute; top:56px; right:24px;" title="Muro de Historial" aria-label="Historial de partidas">${wallSVG}</button>
     <button id="btn-shop" class="btn-icon${activePowerUps > 0 ? ' btn-icon--badge' : ''}" style="position:absolute; top:56px; left:24px;" title="Tienda de Tinta" aria-label="Abrir tienda">${shopSVG}${activePowerUps > 0 ? `<span class="shop-badge">${activePowerUps}</span>` : ''}</button>
     <div class="title-row">${letters}</div>
+    <div class="daily-palette" aria-hidden="true">${dailyPaletteHtml}</div>
     <div class="rank-badge${stats.activeTitle === 'chromatico' ? ' rank-badge--rainbow' : ''}" title="Basado en tu Mejor Puntuación">${userRank}</div>
     <div class="stats-row">
       <div class="stat"><div class="stat-val">${stats.bestScore.toFixed(2)}</div><div class="stat-lbl">Mejor</div></div>
       <div class="stat"><div class="stat-val">${stats.gamesPlayed}</div><div class="stat-lbl">Partidas</div></div>
       <div class="stat"><div class="stat-val">${stats.streak}</div><div class="stat-lbl">Racha 🔥</div></div>
+    </div>
+    <div class="focus-card${focus.done ? ' done' : ''}">
+      <div class="focus-kicker">${focus.done ? 'Completado hoy' : 'Objetivo de hoy'}</div>
+      <div class="focus-title">${focus.title}</div>
+      <div class="focus-sub">${focus.sub}</div>
     </div>
     <p class="start-desc">
       Los humanos no pueden recordar colores con precision.<br>
@@ -420,12 +645,13 @@ function buildStart() {
           <span class="diff-dot on"></span>
           <span class="diff-dot"></span>
           <span class="diff-dot"></span>
+          <span class="diff-dot"></span>
         </div>
         <span class="diff-name" id="diff-name">${DIFFS[diffIdx].label}</span>
       </div>
 
       <div style="position:relative; display:flex; flex-direction:column; align-items:center;">
-        <button class="action-btn play daily" id="btn-daily" title="${playedToday !== undefined ? 'Puntuación: ' + playedToday.toFixed(2) : 'Desafío Diario'}" ${isDailyLocked ? 'style="opacity:0.4; cursor:not-allowed;"' : ''}>
+        <button class="action-btn play daily" id="btn-daily" title="${playedToday !== undefined ? 'Puntuación: ' + playedToday.toFixed(2) : 'Desafío Diario'}" ${isDailyLocked ? 'style="opacity:0.4; cursor:not-allowed;" aria-disabled="true" data-locked="true"' : ''}>
           <div class="btn-rainbow-overlay"></div>${calendarSVG}
         </button>
         ${isDailyLocked ? '<div id="daily-countdown" style="position:absolute; bottom:-20px; font-size:0.6rem; color:#888; white-space:nowrap; font-weight:700;"></div>' : ''}
@@ -497,11 +723,25 @@ function buildStart() {
 
   ['btn-daily', 'btn-practice', 'btn-survival'].forEach(id => {
     const btn = document.getElementById(id);
-    if (!btn || btn.style.opacity) return; // skip if disabled
-    btn.addEventListener('mouseenter', startShake);
-    btn.addEventListener('mouseleave', stopShake);
+    if (!btn) return;
+    const locked = btn.dataset.locked === 'true';
+    if (!locked) {
+      btn.addEventListener('mouseenter', startShake);
+      btn.addEventListener('mouseleave', stopShake);
+    }
     btn.addEventListener('click', () => {
+      if (locked) {
+        playTone(180, 'triangle', 0.12, 0.08);
+        const cdEl = document.getElementById('daily-countdown');
+        gsap.fromTo(btn, { x: -5 }, { x: 0, duration: 0.08, repeat: 5, yoyo: true, ease: 'none' });
+        if (cdEl) {
+          gsap.fromTo(cdEl, { scale: 1.35, color: '#fff' }, { scale: 1, color: '#888', duration: 0.45, ease: 'back.out(2)' });
+        }
+        return;
+      }
+      const mode = id.replace('btn-', '');
       playClick();
+      playStartJingle(mode);
       document.querySelectorAll('.play').forEach(b => b.style.pointerEvents = 'none');
       stopShake();
       gsap.to(el, { x: 0, y: 0, rotation: 0, duration: 0.1 });
@@ -510,7 +750,7 @@ function buildStart() {
       gsap.to(el, {
         y: -28, opacity: 0, scale: 0.97,
         duration: 0.3, ease: 'power2.in',
-        onComplete: () => { el.remove(); buildCountdown(() => startGame(id.replace('btn-', ''))); }
+        onComplete: () => { el.remove(); buildCountdown(() => startGame(mode)); }
       });
     }, { once: true });
   });
@@ -519,11 +759,11 @@ function buildStart() {
   const letEls = el.querySelectorAll('.title-letter');
   const hues   = [0, 45, 140, 200, 260];
   gsap.set(letEls, { y: 70, opacity: 0 });
-  gsap.set(['.start-desc', '.tagline-box', '.action-row'], { y: 18, opacity: 0 });
+  gsap.set(['.daily-palette', '.focus-card', '.start-desc', '.tagline-box', '.action-grid-modern'], { y: 18, opacity: 0 });
 
   gsap.timeline()
     .to(letEls, { y: 0, opacity: 1, duration: 0.55, stagger: 0.07, ease: 'back.out(1.8)' })
-    .to(['.start-desc', '.tagline-box', '.action-row'], {
+    .to(['.daily-palette', '.focus-card', '.start-desc', '.tagline-box', '.action-grid-modern'], {
       y: 0, opacity: 1, stagger: 0.07, duration: 0.4, ease: 'power2.out',
     }, '-=0.2');
 
@@ -560,19 +800,22 @@ function buildCountdown(onDone) {
     const isLast = i === steps.length - 1;
 
     if (isLast) {
-      playTone(880, 'sine', 0.2, 0.1);
-      setTimeout(() => playTone(1320, 'sine', 0.3, 0.1), 50);
+      playTone(880, 'sine', 0.15, 0.16);
+      setTimeout(() => playTone(1109.73, 'sine', 0.18, 0.14), 45);
+      setTimeout(() => playTone(1318.51, 'sine', 0.26, 0.13), 90);
     } else {
-      playTone(440, 'sine', 0.1, 0.1);
+      playTone(i === 0 ? 330 : 550, 'sine', 0.13, 0.09);
     }
 
     gsap.fromTo(we,
-      { scale: isLast ? 0.3 : 0.55, opacity: 0, y: isLast ? 0 : 18 },
-      { scale: isLast ? 1.08 : 1, opacity: 1, y: 0, duration: isLast ? 0.45 : 0.35, ease: 'back.out(2.2)' }
+      { scale: isLast ? 0.1 : 0.55, opacity: 0, y: isLast ? 0 : 18 },
+      { scale: isLast ? 1.15 : 1, opacity: 1, y: 0, duration: isLast ? 0.55 : 0.35, ease: isLast ? 'elastic.out(1.2, 0.4)' : 'back.out(2.2)' }
     );
 
     if (isLast) {
-      gsap.to(el, { backgroundColor: 'rgba(76,217,100,0.06)', duration: 0.15, yoyo: true, repeat: 3, ease: 'none' });
+      gsap.fromTo(el, { scale: 1 }, { scale: 1.05, duration: 0.08, yoyo: true, repeat: 1, ease: 'none' });
+      gsap.to(el, { backgroundColor: 'rgba(76,217,100,0.22)', duration: 0.08 });
+      gsap.to(el, { backgroundColor: 'rgba(10,10,10,1)', duration: 0.55, delay: 0.08 });
       gsap.to(we, {
         scale: 1.2, opacity: 0, duration: 0.28, delay: 0.52, ease: 'power2.in',
         onComplete: () => {
@@ -621,6 +864,8 @@ function buildMemorize(color) {
     <span class="mem-brand">Color Game</span>
   `;
   app.appendChild(el);
+  showHomeBtn();
+  playColorReveal(color);
 
   gsap.fromTo(el,
     { clipPath: 'circle(0% at 50% 50%)', opacity: 0.7 },
@@ -632,7 +877,7 @@ function buildMemorize(color) {
     { scale: 1, opacity: 1, delay: 0.25, duration: 0.5, ease: 'back.out(1.7)' }
   );
 
-  const glowTween = gsap.to(el, {
+  const glowTween = lowPowerMode ? null : gsap.to(el, {
     boxShadow: `0 0 80px ${hsvToCss(color.h, color.s, color.v)}55, 0 40px 100px rgba(0,0,0,0.7)`,
     repeat: -1, yoyo: true, duration: 1.2, ease: 'sine.inOut',
   });
@@ -650,13 +895,15 @@ function buildMemorize(color) {
       { scale: 1.8, opacity: 1 },
       { scale: 1, opacity: 0.8, duration: 0.6, ease: 'power2.out', force3D: true }
     );
-    gsap.fromTo(el, { boxShadow: `0 0 80px ${hsvToCss(color.h, color.s, color.v)}77` }, { boxShadow: '0 40px 100px rgba(0,0,0,0.7)', duration: 0.6 });
+    if (!lowPowerMode) {
+      gsap.fromTo(el, { boxShadow: `0 0 80px ${hsvToCss(color.h, color.s, color.v)}77` }, { boxShadow: '0 40px 100px rgba(0,0,0,0.7)', duration: 0.6 });
+    }
     playTone(300, 'sine', 0.1, 0.03);
     
     if (remaining <= 0) {
       done = true;
       clearInterval(timerIv); timerIv = null;
-      glowTween.kill();
+      if (glowTween) glowTween.kill();
       gsap.killTweensOf(el);
       gsap.to(el, {
         rotationY: -90, opacity: 0, duration: 0.4, ease: 'power2.in',
@@ -671,6 +918,7 @@ function buildMemorize(color) {
 function buildGuess() {
   P = { h: 180, s: 50, v: 50 };
   G.guessStartTime = Date.now();
+  lastPickerPaint = { h: null, s: null, v: null, blind: null };
 
   const el = document.createElement('div');
   el.className = 'card guess-card';
@@ -761,10 +1009,7 @@ function updatePicker() {
     const css = isBlind ? '#050505' : hsvToCss(P.h, P.s, P.v);
     
     box.style.backgroundColor = css;
-    if (!isMobile) {
-      // Simplificar sombras pesadas
-      box.style.boxShadow = isBlind ? 'inset 0 0 10px rgba(0,0,0,0.5)' : `0 10px 30px ${css}66`;
-    }
+    box.style.boxShadow = isBlind ? 'inset 0 0 10px rgba(0,0,0,0.5)' : `0 10px 30px ${css}66`;
     
     if (isBlind && !box.querySelector('.blind-icon')) {
       const icon = document.createElement('div');
@@ -779,27 +1024,30 @@ function updatePicker() {
 
     if (hsbEl) hsbEl.innerHTML = isBlind ? `H??? &bull; S??? &bull; B???` : `H${P.h} &bull; S${P.s} &bull; B${P.v}`;
 
-    // Fondo del card respira con el color seleccionado
+    // Evita recalcular el fondo si el tono no ha cambiado.
     const guessCard = document.getElementById('screen-guess');
-    if (guessCard) {
+    if (guessCard && !lowPowerMode && (lastPickerPaint.h !== P.h || lastPickerPaint.blind !== isBlind)) {
       guessCard.style.background = isBlind ? '#111' : `linear-gradient(145deg, ${hsvToCss(P.h, 22, 13)}, #111 60%)`;
     }
 
-    // Glow en los thumbs que coincide con el color seleccionado (desactivado en movil para mas FPS)
-    const thumbGlow = (isBlind || isMobile) ? '0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px rgba(255,255,255,0.2)' : `0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px ${css}70, 0 0 12px ${css}60`;
+    const thumbGlow = isBlind ? '0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px rgba(255,255,255,0.2)' : `0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px ${css}70, 0 0 12px ${css}60`;
     ['hue-thumb','sat-thumb','bri-thumb'].forEach(id => {
       const t = document.getElementById(id);
       if (t) t.style.boxShadow = thumbGlow;
     });
 
-    if (satStrip) satStrip.style.background = `linear-gradient(to bottom, ${hsvToCss(P.h,100,P.v)}, ${hsvToCss(P.h,0,P.v)})`;
-    if (briStrip) briStrip.style.background = `linear-gradient(to bottom, ${hsvToCss(P.h,P.s,100)}, ${hsvToCss(P.h,P.s,0)})`;
+    if (satStrip && (lastPickerPaint.h !== P.h || lastPickerPaint.v !== P.v)) {
+      satStrip.style.background = `linear-gradient(to bottom, ${hsvToCss(P.h,100,P.v)}, ${hsvToCss(P.h,0,P.v)})`;
+    }
+    if (briStrip && (lastPickerPaint.h !== P.h || lastPickerPaint.s !== P.s)) {
+      briStrip.style.background = `linear-gradient(to bottom, ${hsvToCss(P.h,P.s,100)}, ${hsvToCss(P.h,P.s,0)})`;
+    }
 
     if (hueCol)   { const t = document.getElementById('hue-thumb'); if (t) t.style.top = `${(P.h/360)*hueCol.clientHeight-11}px`; hueCol.setAttribute('aria-valuenow', P.h); }
     if (satStrip) { const t = document.getElementById('sat-thumb'); if (t) t.style.top = `${((100-P.s)/100)*satStrip.clientHeight-11}px`; satStrip.setAttribute('aria-valuenow', P.s); }
     if (briStrip) { const t = document.getElementById('bri-thumb'); if (t) t.style.top = `${((100-P.v)/100)*briStrip.clientHeight-11}px`; briStrip.setAttribute('aria-valuenow', P.v); }
 
-    if (!isMobile) {
+    if (!lowPowerMode) {
       let ambi = document.getElementById('ambilight');
       if (!ambi) {
         ambi = document.createElement('div');
@@ -809,6 +1057,7 @@ function updatePicker() {
       }
       ambi.style.background = isBlind ? 'transparent' : hsvToCss(P.h, 100, 50);
     }
+    lastPickerPaint = { h: P.h, s: P.s, v: P.v, blind: isBlind };
     
     pickerUpdatePending = false;
   });
@@ -898,6 +1147,18 @@ function submitGuess() {
   if (finalSc >= 9.0) G.combo++;
   else G.combo = 0;
 
+  if (G.combo >= 2) {
+    playCombo(G.combo);
+    const comboEl = document.createElement('div');
+    comboEl.className = 'combo-popup';
+    comboEl.textContent = `🔥 COMBO x${G.combo}`;
+    document.body.appendChild(comboEl);
+    gsap.fromTo(comboEl, { scale: 0.4, opacity: 0 },
+      { scale: 1.1, opacity: 1, duration: 0.35, ease: 'back.out(3)' });
+    gsap.to(comboEl, { opacity: 0, y: -70, scale: 0.85, duration: 0.45, delay: 0.6,
+      ease: 'power2.in', onComplete: () => comboEl.remove() });
+  }
+
   G.guesses.push(guess);
   G.scores.push(finalSc);
   const sc = finalSc;
@@ -911,6 +1172,7 @@ function submitGuess() {
     if (!titleEl.textContent.includes('🔥')) titleEl.textContent += ' 🔥';
   }
 
+  playSwish();
   gsap.timeline()
     .to(btn, { scale: 1.5, duration: 0.12, ease: 'power2.out' })
     .to(btn, { scale: 0.85, duration: 0.1 })
@@ -931,6 +1193,19 @@ function submitGuess() {
 function buildResult(target, guess, sc, bonusStr = '') {
   const topCss = hsvToCss(guess.h, guess.s, guess.v);
   const botCss = hsvToCss(target.h, target.s, target.v);
+  const breakdown = getRoundBreakdown(target, guess);
+  const analysisHtml = breakdown.map(part => {
+    const pct = Math.round(part.score * 100);
+    const hue = Math.round(part.score * 120);
+    return `
+      <div class="res-analysis-row">
+        <span class="res-analysis-key">${part.short}</span>
+        <div class="res-analysis-track"><span data-width="${pct}%" style="width:${pct}%; background:hsl(${hue},70%,58%)"></span></div>
+        <span class="res-analysis-diff">${part.diff}</span>
+      </div>
+    `;
+  }).join('');
+  const roundTip = getRoundTip(breakdown);
 
   const el = document.createElement('div');
   el.className = 'card result-card';
@@ -952,6 +1227,10 @@ function buildResult(target, guess, sc, bonusStr = '') {
       <div class="res-score-desc">${scoreDesc(sc)}</div>
       <div class="res-score-bonus" id="res-bonus">${bonusStr}</div>
     </div>
+    <div class="res-analysis" id="res-analysis">
+      <div class="res-analysis-title">${roundTip}</div>
+      ${analysisHtml}
+    </div>
     ${sc < 5.0 && G.hasRetry && !G.retryUsed ? `<button class="btn-retry" id="btn-retry" aria-label="Reintentar esta ronda">🔄 Segunda Oportunidad</button>` : ''}
     <button class="btn-next" id="btn-next">&#8594;</button>
   `;
@@ -960,15 +1239,33 @@ function buildResult(target, guess, sc, bonusStr = '') {
   gsap.fromTo(el, { rotationY: 90, opacity: 0 }, { rotationY: 0, opacity: 1, duration: 0.5, ease: 'back.out(1.5)' });
   gsap.fromTo('#res-top', { y: '-100%' }, { y: 0, duration: 0.55, ease: 'power3.out' });
   gsap.fromTo('#res-bot', { y:  '100%' }, { y: 0, duration: 0.55, ease: 'power3.out' });
-  gsap.fromTo('#score-pill', { scale: 0.4, opacity: 0 }, { scale: 1, opacity: 1, delay: 0.35, duration: 0.5, ease: 'back.out(2)' });
+  gsap.fromTo('#score-pill',
+    { scale: 0.2, opacity: 0, y: 12 },
+    { scale: 1, opacity: 1, y: 0, delay: 0.35, duration: 0.65, ease: 'elastic.out(1.1, 0.5)' }
+  );
+  if (!lowPowerMode) {
+    gsap.fromTo('#score-pill',
+      { boxShadow: '0 0 55px rgba(255,255,255,0.55)' },
+      { boxShadow: '0 0 0px rgba(255,255,255,0)', delay: 0.95, duration: 1.0, ease: 'power2.out' }
+    );
+  }
+  gsap.fromTo('#res-analysis',
+    { y: 14, opacity: 0 },
+    { y: 0, opacity: 1, delay: 0.85, duration: 0.45, ease: 'power2.out' }
+  );
+  gsap.fromTo('.res-analysis-track span',
+    { width: 0 },
+    { width: (i, el) => el.dataset.width, delay: 0.95, duration: 0.7, stagger: 0.08, ease: 'power3.out' }
+  );
 
   const counter = { value: 0 };
   const numEl = document.getElementById('res-num');
   gsap.to(counter, {
-    value: sc, delay: 0.35, duration: 0.9, ease: 'power2.out',
+    value: sc, delay: 0.38, duration: 0.85, ease: 'power3.out',
     onStart: () => playReveal(sc),
     onUpdate() { numEl.textContent = counter.value.toFixed(2); },
     onComplete: () => {
+      gsap.fromTo(numEl, { scale: 1.22 }, { scale: 1, duration: 0.38, ease: 'elastic.out(1, 0.5)' });
       if (sc < 5.0) {
         const obj = { x: 0, y: 0 };
         gsap.to(obj, {
@@ -1024,6 +1321,7 @@ function buildResult(target, guess, sc, bonusStr = '') {
   const btnNext = document.getElementById('btn-next');
   btnNext.addEventListener('click', () => {
     btnNext.style.pointerEvents = 'none';
+    playSwish();
 
     if (G.mode === 'survival') {
       if (sc < 7.5) {
@@ -1059,6 +1357,7 @@ function buildResult(target, guess, sc, bonusStr = '') {
 // ── FINAL SCREEN ──────────────────────────────────────────────────────────────
 
 function buildFinal() {
+  hideHomeBtn();
   const numRounds = G.mode === 'survival' ? G.round + 1 : ROUNDS;
   const avg = G.scores.reduce((a, b) => a + b, 0) / numRounds;
   
@@ -1123,6 +1422,15 @@ function buildFinal() {
   const C    = 2 * Math.PI * R;
   const frac = avg / 10;
   const hue  = Math.round(frac * 120);
+  const perfects = G.scores.filter(s => s >= 9.5).length;
+  const bestRound = Math.max(...G.scores);
+  const awards = getSessionAwards(avg, perfects, bestRound, numRounds);
+  const awardsHtml = awards.map(a => `
+    <div class="award-chip award-chip--${a.tone}">
+      <span>${a.label}</span>
+      <strong>${a.value}</strong>
+    </div>
+  `).join('');
 
   const el = document.createElement('div');
   el.className = 'card final-card';
@@ -1173,6 +1481,7 @@ function buildFinal() {
       <div class="ring-num" id="final-num">0</div>
     </div>
     <div class="final-desc">${scoreDesc(avg)}</div>
+    <div class="final-awards" id="final-awards">${awardsHtml}</div>
     <div class="recap-list">${recap}</div>
     <div class="final-actions">
       <button class="btn-share" id="btn-share">
@@ -1185,19 +1494,32 @@ function buildFinal() {
   app.appendChild(el);
 
   gsap.fromTo(el, { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: 'power2.out' });
-  gsap.to('#score-ring', { strokeDashoffset: C*(1-frac), delay: 0.3, duration: 1.6, ease: 'power2.out' });
+  const ringTarget = C * (1 - frac);
+  gsap.to('#score-ring', {
+    strokeDashoffset: Math.max(0, ringTarget - C * 0.025),
+    delay: 0.3, duration: 1.4, ease: 'power3.out',
+    onComplete: () => gsap.to('#score-ring', { strokeDashoffset: ringTarget, duration: 0.38, ease: 'power2.inOut' })
+  });
 
   const counter = { value: 0 };
   const numEl   = document.getElementById('final-num');
   gsap.to(counter, {
-    value: avg, delay: 0.3, duration: 1.6, ease: 'power2.out',
-    onUpdate() { numEl.textContent = counter.value.toFixed(2); }
+    value: avg, delay: 0.3, duration: 1.35, ease: 'power3.out',
+    onUpdate() { numEl.textContent = counter.value.toFixed(2); },
+    onComplete: () => gsap.fromTo(numEl, { scale: 1.25 }, { scale: 1, duration: 0.4, ease: 'elastic.out(1.1, 0.5)' })
   });
-  gsap.to(numEl, { color: `hsl(${hue},70%,65%)`, delay: 1.6, duration: 0.4 });
+  gsap.to(numEl, { color: `hsl(${hue},70%,65%)`, delay: 1.35, duration: 0.4 });
 
   const rows = el.querySelectorAll('.recap-row');
   gsap.set(rows, { x: 32, opacity: 0 });
   gsap.to(rows, { x: 0, opacity: 1, stagger: 0.08, delay: 0.5, duration: 0.4, ease: 'power2.out' });
+
+  const awardEls = el.querySelectorAll('.award-chip');
+  gsap.set(awardEls, { y: 14, opacity: 0, scale: 0.92 });
+  gsap.to(awardEls, {
+    y: 0, opacity: 1, scale: 1, stagger: 0.09, delay: 0.85, duration: 0.38, ease: 'back.out(1.8)',
+    onStart: () => awards.forEach((_, i) => setTimeout(() => playAwardPop(i), i * 90))
+  });
 
   gsap.set('#btn-replay', { y: 16, opacity: 0 });
   gsap.to('#btn-replay',  { y: 0, opacity: 1, delay: 1.1, duration: 0.4, ease: 'back.out(1.5)' });
@@ -1210,6 +1532,7 @@ function buildFinal() {
   if (G.mode === 'challenge') btnReplay.textContent = 'Menú Principal';
   btnReplay.addEventListener('click', () => {
     btnReplay.style.pointerEvents = 'none';
+    playSwish();
     gsap.to(el, { y: -28, opacity: 0, duration: 0.3, ease: 'power2.in',
       onComplete: () => { 
         el.remove(); 
@@ -1772,9 +2095,17 @@ let pActiveColor = null;
 
 function initParticles() {
   if (!pCanvas) return;
+  if (isMobile) {
+    pCanvas.width = 1;
+    pCanvas.height = 1;
+    pCanvas.style.display = 'none';
+    particles = [];
+    return;
+  }
+  pCanvas.style.display = '';
   pCanvas.width = window.innerWidth;
   pCanvas.height = window.innerHeight;
-  const count = isMobile ? 35 : 90;
+  const count = 55;
   particles = Array.from({ length: count }, () => {
     const theme = stats.activeTheme;
     return {
@@ -1794,10 +2125,11 @@ let pPaused = false;
 let lastPColorStr = '';
 let lastPDraw = 0;
 function drawParticles(now) {
-  if (!pCanvas || pPaused) return;
+  if (!pCanvas || pPaused || isMobile) return;
   requestAnimationFrame(drawParticles);
   
-  if (now - lastPDraw < 20) return; 
+  now = now || performance.now();
+  if (now - lastPDraw < 33) return; 
   lastPDraw = now;
 
   pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
