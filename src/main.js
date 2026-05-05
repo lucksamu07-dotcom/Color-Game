@@ -2373,10 +2373,10 @@ document.addEventListener('visibilitychange', () => {
   pPaused = document.hidden;
   if (!pPaused) requestAnimationFrame(drawParticles);
 });
+document.body.classList.toggle('perf-no-blur', !perfSettings.blur);
 initParticles();
 drawParticles();
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 
-applyPerf();
 buildStart();
