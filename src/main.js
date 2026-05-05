@@ -272,6 +272,32 @@ const isMobile = window.matchMedia('(max-width: 768px)').matches;
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const lowPowerMode = prefersReducedMotion;
 
+// ── Ajustes de rendimiento ────────────────────────────────────────────────────
+function defaultPerf() {
+  return isMobile
+    ? { particles: 'low',  ambilight: false, glow: false, blur: false }
+    : { particles: 'high', ambilight: true,  glow: true,  blur: true  };
+}
+let perfSettings = (() => {
+  try { return JSON.parse(localStorage.getItem('colorGamePerf')) || defaultPerf(); }
+  catch { return defaultPerf(); }
+})();
+function savePerf() { localStorage.setItem('colorGamePerf', JSON.stringify(perfSettings)); }
+function applyPerf() {
+  document.body.classList.toggle('perf-no-blur', !perfSettings.blur);
+  initParticles();
+  // Ocultar/mostrar ambilight existente según ajuste
+  const ambi = document.getElementById('ambilight');
+  if (ambi && !perfSettings.ambilight) ambi.style.background = 'transparent';
+}
+function getPreset() {
+  const p = perfSettings;
+  if (p.particles === 'none' && !p.ambilight && !p.glow && !p.blur) return 'perf';
+  if (p.particles === 'low'  && !p.ambilight &&  p.glow && !p.blur) return 'bal';
+  if (p.particles === 'high' &&  p.ambilight &&  p.glow &&  p.blur) return 'quality';
+  return 'custom';
+}
+
 function hsvToCss(h, s, v) {
   s /= 100; v /= 100;
   const l = v * (1 - s / 2);
@@ -483,6 +509,124 @@ function cycleDiff() {
   gsap.fromTo('#diff-chip', { scale: 0.92 }, { scale: 1, duration: 0.3, ease: 'back.out(2.5)' });
 }
 
+// ── SETTINGS SCREEN ──────────────────────────────────────────────────────────
+
+function buildSettings() {
+  const el = document.createElement('div');
+  el.className = 'card settings-card custom-scrollbar';
+
+  const PRESETS = {
+    perf:    { particles: 'none', ambilight: false, glow: false, blur: false },
+    bal:     { particles: 'low',  ambilight: false, glow: true,  blur: false },
+    quality: { particles: 'high', ambilight: true,  glow: true,  blur: true  },
+  };
+
+  function renderUI() {
+    const cur = getPreset();
+    el.innerHTML = `
+      <div class="shop-header">
+        <div class="shop-title">Ajustes</div>
+        <button id="btn-settings-close" class="btn-icon-close" aria-label="Cerrar">&times;</button>
+      </div>
+
+      <div style="padding:0 4px;">
+        <div class="shop-section-title" style="margin-bottom:8px;">⚡ Modo rápido</div>
+        <div class="preset-row">
+          <button class="preset-btn${cur==='perf'    ? ' active':''}" id="preset-perf">🚀<br>Rendimiento</button>
+          <button class="preset-btn${cur==='bal'     ? ' active':''}" id="preset-bal">⚖️<br>Equilibrado</button>
+          <button class="preset-btn${cur==='quality' ? ' active':''}" id="preset-quality">✨<br>Calidad</button>
+        </div>
+      </div>
+
+      <div class="shop-section-title" style="margin-top:4px;">🎨 Detalle</div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Partículas de fondo</div>
+          <div class="setting-desc">Puntos animados que flotan en el fondo</div>
+        </div>
+        <div class="seg-ctrl">
+          <button class="seg-btn${perfSettings.particles==='none' ?' active':''}" data-key="particles" data-val="none">Ninguna</button>
+          <button class="seg-btn${perfSettings.particles==='low'  ?' active':''}" data-key="particles" data-val="low">Pocas</button>
+          <button class="seg-btn${perfSettings.particles==='high' ?' active':''}" data-key="particles" data-val="high">Muchas</button>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Luz ambiental</div>
+          <div class="setting-desc">Brillo de fondo al seleccionar colores</div>
+        </div>
+        <button class="toggle-pill${perfSettings.ambilight?' on':''}" data-key="ambilight" aria-label="Luz ambiental"></button>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Sombras y brillo</div>
+          <div class="setting-desc">Glow dinámico en el selector de color</div>
+        </div>
+        <button class="toggle-pill${perfSettings.glow?' on':''}" data-key="glow" aria-label="Sombras"></button>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Efectos de cristal</div>
+          <div class="setting-desc">Desenfoque en botones y diálogos</div>
+        </div>
+        <button class="toggle-pill${perfSettings.blur?' on':''}" data-key="blur" aria-label="Cristal"></button>
+      </div>
+
+      <button id="btn-settings-reset" style="padding:12px; border-radius:12px; border:1px solid #2a2a2a; background:#111; color:#555; font-size:0.78rem; font-weight:700; cursor:pointer; transition:all 0.15s; touch-action:manipulation; width:100%;">
+        Restaurar valores por defecto del dispositivo
+      </button>
+    `;
+
+    document.getElementById('btn-settings-close').addEventListener('click', () => {
+      playClick();
+      gsap.to(el, { y: 40, opacity: 0, scale: 0.97, duration: 0.25, ease: 'power2.in',
+        onComplete: () => { el.remove(); buildStart(); } });
+    });
+
+    ['perf','bal','quality'].forEach(id => {
+      document.getElementById(`preset-${id}`).addEventListener('click', () => {
+        playClick();
+        Object.assign(perfSettings, PRESETS[id]);
+        savePerf(); applyPerf();
+        renderUI();
+      });
+    });
+
+    el.querySelectorAll('.seg-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        playClick();
+        perfSettings[btn.dataset.key] = btn.dataset.val;
+        savePerf(); applyPerf();
+        renderUI();
+      });
+    });
+
+    el.querySelectorAll('.toggle-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        playClick();
+        perfSettings[pill.dataset.key] = !perfSettings[pill.dataset.key];
+        savePerf(); applyPerf();
+        renderUI();
+      });
+    });
+
+    document.getElementById('btn-settings-reset').addEventListener('click', () => {
+      playClick();
+      Object.assign(perfSettings, defaultPerf());
+      savePerf(); applyPerf();
+      renderUI();
+    });
+  }
+
+  renderUI();
+  app.appendChild(el);
+  gsap.fromTo(el, { y: 60, opacity: 0, scale: 0.97 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, ease: 'back.out(1.5)' });
+}
+
 // ── HOME BUTTON & QUIT CONFIRM ────────────────────────────────────────────────
 
 let homeBtn = null;
@@ -581,6 +725,7 @@ function buildStart() {
   const calendarSVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`;
   const wallSVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>`;
   const shopSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>`;
+  const gearSVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
 
   const letters = 'color'.split('').map(l => `<span class="title-letter">${l}</span>`).join('');
   
@@ -657,6 +802,11 @@ function buildStart() {
         ${isDailyLocked ? '<div id="daily-countdown" style="position:absolute; bottom:-20px; font-size:0.6rem; color:#888; white-space:nowrap; font-weight:700;"></div>' : ''}
       </div>
     </div>
+    <div style="text-align:center; margin-top:14px;">
+      <button class="btn-icon" id="btn-settings" style="display:inline-flex; align-items:center; gap:5px; font-size:0.72rem; color:#444; padding:6px 10px; border-radius:8px;" aria-label="Ajustes de rendimiento">
+        ${gearSVG} Ajustes
+      </button>
+    </div>
   `;
   app.appendChild(el);
 
@@ -672,6 +822,12 @@ function buildStart() {
     playClick();
     el.remove(); stopTaglines();
     buildShop();
+  });
+
+  document.getElementById('btn-settings').addEventListener('click', () => {
+    playClick();
+    el.remove(); stopTaglines();
+    buildSettings();
   });
 
   document.getElementById('diff-chip').addEventListener('click', () => {
@@ -1030,7 +1186,7 @@ function updatePicker() {
       guessCard.style.background = isBlind ? '#111' : `linear-gradient(145deg, ${hsvToCss(P.h, 22, 13)}, #111 60%)`;
     }
 
-    const thumbGlow = isBlind ? '0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px rgba(255,255,255,0.2)' : `0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px ${css}70, 0 0 12px ${css}60`;
+    const thumbGlow = (isBlind || !perfSettings.glow) ? '0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px rgba(255,255,255,0.2)' : `0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px ${css}70, 0 0 12px ${css}60`;
     ['hue-thumb','sat-thumb','bri-thumb'].forEach(id => {
       const t = document.getElementById(id);
       if (t) t.style.boxShadow = thumbGlow;
@@ -1047,7 +1203,7 @@ function updatePicker() {
     if (satStrip) { const t = document.getElementById('sat-thumb'); if (t) t.style.top = `${((100-P.s)/100)*satStrip.clientHeight-11}px`; satStrip.setAttribute('aria-valuenow', P.s); }
     if (briStrip) { const t = document.getElementById('bri-thumb'); if (t) t.style.top = `${((100-P.v)/100)*briStrip.clientHeight-11}px`; briStrip.setAttribute('aria-valuenow', P.v); }
 
-    if (!lowPowerMode) {
+    if (perfSettings.ambilight) {
       let ambi = document.getElementById('ambilight');
       if (!ambi) {
         ambi = document.createElement('div');
@@ -2095,7 +2251,7 @@ let pActiveColor = null;
 
 function initParticles() {
   if (!pCanvas) return;
-  if (isMobile) {
+  if (perfSettings.particles === 'none') {
     pCanvas.width = 1;
     pCanvas.height = 1;
     pCanvas.style.display = 'none';
@@ -2105,7 +2261,7 @@ function initParticles() {
   pCanvas.style.display = '';
   pCanvas.width = window.innerWidth;
   pCanvas.height = window.innerHeight;
-  const count = 55;
+  const count = perfSettings.particles === 'low' ? 30 : 55;
   particles = Array.from({ length: count }, () => {
     const theme = stats.activeTheme;
     return {
@@ -2125,7 +2281,7 @@ let pPaused = false;
 let lastPColorStr = '';
 let lastPDraw = 0;
 function drawParticles(now) {
-  if (!pCanvas || pPaused || isMobile) return;
+  if (!pCanvas || pPaused || perfSettings.particles === 'none') return;
   requestAnimationFrame(drawParticles);
   
   now = now || performance.now();
@@ -2222,4 +2378,5 @@ drawParticles();
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 
+applyPerf();
 buildStart();

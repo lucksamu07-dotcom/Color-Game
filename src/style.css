@@ -844,6 +844,80 @@ body::before {
   white-space: nowrap;
 }
 
+/* ── SETTINGS SCREEN ──────────────────────────── */
+.settings-card {
+  padding: 28px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 80vh;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  background: #181818;
+  border-radius: 14px;
+  border: 1px solid #222;
+  transition: border-color 0.2s;
+}
+
+.setting-info { flex: 1; }
+.setting-name { font-size: 0.92rem; font-weight: 800; color: #fff; margin-bottom: 3px; }
+.setting-desc { font-size: 0.72rem; color: #666; line-height: 1.4; }
+
+.seg-ctrl { display: flex; gap: 4px; flex-shrink: 0; }
+.seg-btn {
+  padding: 7px 11px; border-radius: 50px;
+  border: 1px solid #2a2a2a; background: #111; color: #555;
+  font-size: 0.72rem; font-weight: 700; cursor: pointer;
+  transition: all 0.15s; touch-action: manipulation;
+  white-space: nowrap;
+}
+.seg-btn.active { background: #fff; color: #111; border-color: #fff; }
+.seg-btn:active { transform: scale(0.94); }
+
+.toggle-pill {
+  width: 48px; height: 26px; border-radius: 13px;
+  background: #2a2a2a; border: none; position: relative;
+  cursor: pointer; transition: background 0.2s; flex-shrink: 0;
+  touch-action: manipulation;
+}
+.toggle-pill.on { background: #4cd964; }
+.toggle-pill::after {
+  content: ''; position: absolute;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; top: 3px; left: 3px;
+  transition: transform 0.2s;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+}
+.toggle-pill.on::after { transform: translateX(22px); }
+
+.preset-row { display: flex; gap: 8px; }
+.preset-btn {
+  flex: 1; padding: 12px 6px; border-radius: 12px;
+  border: 1px solid #222; background: #181818; color: #666;
+  font-size: 0.72rem; font-weight: 700; cursor: pointer;
+  transition: all 0.18s; text-align: center;
+  touch-action: manipulation; line-height: 1.5;
+}
+.preset-btn.active { background: #fff; color: #111; border-color: #fff; }
+.preset-btn:active { transform: scale(0.96); }
+
+/* Clase aplicada al <body> cuando los efectos de cristal están desactivados */
+.perf-no-blur .btn-home-game,
+.perf-no-blur .btn-mute {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.perf-no-blur .quit-overlay {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(0,0,0,0.88) !important;
+}
+
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: #2a2a2a transparent;
