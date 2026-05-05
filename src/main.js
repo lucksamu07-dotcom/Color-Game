@@ -275,7 +275,7 @@ const lowPowerMode = prefersReducedMotion;
 // ── Ajustes de rendimiento ────────────────────────────────────────────────────
 function defaultPerf() {
   return isMobile
-    ? { particles: 'low',  ambilight: false, glow: false, blur: false }
+    ? { particles: 'none', ambilight: false, glow: false, blur: false }
     : { particles: 'high', ambilight: true,  glow: true,  blur: true  };
 }
 let perfSettings = (() => {
@@ -293,7 +293,7 @@ function applyPerf() {
 function getPreset() {
   const p = perfSettings;
   if (p.particles === 'none' && !p.ambilight && !p.glow && !p.blur) return 'perf';
-  if (p.particles === 'low'  && !p.ambilight &&  p.glow && !p.blur) return 'bal';
+  if (p.particles === 'low'  && !p.ambilight && !p.glow && !p.blur) return 'bal';
   if (p.particles === 'high' &&  p.ambilight &&  p.glow &&  p.blur) return 'quality';
   return 'custom';
 }
@@ -517,7 +517,7 @@ function buildSettings() {
 
   const PRESETS = {
     perf:    { particles: 'none', ambilight: false, glow: false, blur: false },
-    bal:     { particles: 'low',  ambilight: false, glow: true,  blur: false },
+    bal:     { particles: 'low',  ambilight: false, glow: false, blur: false },
     quality: { particles: 'high', ambilight: true,  glow: true,  blur: true  },
   };
 
@@ -914,21 +914,30 @@ function buildStart() {
   // Entrance
   const letEls = el.querySelectorAll('.title-letter');
   const hues   = [0, 45, 140, 200, 260];
-  gsap.set(letEls, { y: 70, opacity: 0 });
-  gsap.set(['.daily-palette', '.focus-card', '.start-desc', '.tagline-box', '.action-grid-modern'], { y: 18, opacity: 0 });
+  const animTargets = el.querySelectorAll('.daily-palette, .focus-card, .start-desc, .tagline-box, .action-grid-modern');
 
-  gsap.timeline()
-    .to(letEls, { y: 0, opacity: 1, duration: 0.55, stagger: 0.07, ease: 'back.out(1.8)' })
-    .to(['.daily-palette', '.focus-card', '.start-desc', '.tagline-box', '.action-grid-modern'], {
-      y: 0, opacity: 1, stagger: 0.07, duration: 0.4, ease: 'power2.out',
-    }, '-=0.2');
+  if (prefersReducedMotion) {
+    gsap.set(letEls, { opacity: 1 });
+    gsap.set(animTargets, { opacity: 1 });
+  } else {
+    gsap.fromTo(letEls,
+      { y: 50, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.5, stagger: 0.07, ease: 'back.out(1.8)', clearProps: 'transform' }
+    );
+    gsap.fromTo(animTargets,
+      { y: 14, opacity: 0 },
+      { y: 0, opacity: 1, stagger: 0.06, duration: 0.4, ease: 'power2.out', delay: 0.22, clearProps: 'transform' }
+    );
+  }
 
-  letEls.forEach((l, i) => {
-    gsap.to(l, {
-      color: `hsl(${hues[i]},85%,65%)`, duration: 0.01, delay: i * 0.07,
-      onComplete: () => { gsap.to(l, { color: '#fff', duration: 0.5, delay: 0.15, ease: 'power2.out' }); }
+  if (!prefersReducedMotion) {
+    letEls.forEach((l, i) => {
+      gsap.to(l, {
+        color: `hsl(${hues[i]},85%,65%)`, duration: 0.01, delay: i * 0.07,
+        onComplete: () => { gsap.to(l, { color: '#fff', duration: 0.5, delay: 0.15, ease: 'power2.out' }); }
+      });
     });
-  });
+  }
 }
 
 // ── COUNTDOWN SCREEN ─────────────────────────────────────────────────────────
@@ -2379,4 +2388,13 @@ drawParticles();
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 
-buildStart();
+try {
+  buildStart();
+} catch(e) {
+  console.error('buildStart failed:', e);
+  app.innerHTML = `<div class="card start-card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px 24px;">
+    <div style="font-size:3rem;font-weight:900;letter-spacing:-2px;">color</div>
+    <div style="color:#888;font-size:0.85rem;text-align:center;">Error al cargar. Recarga la página.<br><small style="color:#555">${e.message}</small></div>
+    <button onclick="location.reload()" style="padding:12px 28px;border-radius:50px;background:#fff;color:#111;font-weight:800;border:none;font-size:0.9rem;cursor:pointer;margin-top:8px;">Recargar</button>
+  </div>`;
+}
