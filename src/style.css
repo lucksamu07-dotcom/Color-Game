@@ -303,6 +303,13 @@ button:focus-visible,
   height: 460px; display: flex;
   flex-direction: column; align-items: center; justify-content: center; position: relative;
 }
+/* Capa hermana bajo la tarjeta: sombra fija, solo se anima su opacidad (GPU) */
+.mem-glow {
+  border-radius: var(--card-r);
+  pointer-events: none;
+  opacity: 0;
+  will-change: opacity;
+}
 .mem-round {
   position: absolute; top: 22px; left: 24px;
   font-size: 0.75rem; color: rgba(255,255,255,0.45); letter-spacing: 0.5px;
@@ -972,6 +979,91 @@ button:focus-visible,
   -webkit-backdrop-filter: none !important;
   background: rgba(0,0,0,0.88) !important;
 }
+
+/* ── MICRO-ANIMACIONES (solo transform/opacity: gratis para la GPU) ───────── */
+
+/* Las letras del título flotan suavemente (tras la entrada de GSAP) */
+@keyframes letter-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+.title-letter { animation: letter-float 3.4s ease-in-out 1.2s infinite; }
+.title-letter:nth-child(2) { animation-delay: 1.5s; }
+.title-letter:nth-child(3) { animation-delay: 1.8s; }
+.title-letter:nth-child(4) { animation-delay: 2.1s; }
+.title-letter:nth-child(5) { animation-delay: 2.4s; }
+
+/* Destello que recorre la insignia de rango */
+@keyframes shine-sweep { 0%, 55% { transform: translateX(-160%); } 100% { transform: translateX(420%); } }
+.rank-badge { position: relative; overflow: hidden; }
+.rank-badge::after {
+  content: "";
+  position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: linear-gradient(105deg, transparent, rgba(255,255,255,0.16), transparent);
+  transform: translateX(-160%);
+  animation: shine-sweep 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* La paleta del día respira con un latido escalonado */
+@keyframes swatch-breathe {
+  0%, 100% { transform: scaleY(1); opacity: 1; }
+  50%      { transform: scaleY(0.7); opacity: 0.8; }
+}
+.daily-palette-swatch { animation: swatch-breathe 2.8s ease-in-out infinite; }
+.daily-palette-swatch:nth-child(2) { animation-delay: 0.25s; }
+.daily-palette-swatch:nth-child(3) { animation-delay: 0.5s; }
+.daily-palette-swatch:nth-child(4) { animation-delay: 0.75s; }
+.daily-palette-swatch:nth-child(5) { animation-delay: 1s; }
+
+/* La gota de tinta se balancea */
+@keyframes drop-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50%      { transform: translateY(-2px) rotate(-8deg); }
+}
+.ink-drop { display: inline-block; animation: drop-bob 2.4s ease-in-out infinite; }
+
+/* Brillo que barre la tarjeta de objetivo diario */
+.focus-card::after {
+  content: "";
+  position: absolute; top: 0; bottom: 0; left: 0; width: 35%;
+  background: linear-gradient(105deg, transparent, rgba(255,255,255,0.05), transparent);
+  transform: translateX(-160%);
+  animation: shine-sweep 6.5s ease-in-out 1.2s infinite;
+  pointer-events: none;
+}
+
+/* La calavera de supervivencia se sacude de vez en cuando */
+@keyframes skull-wiggle {
+  0%, 84%, 100% { transform: rotate(0); }
+  88%  { transform: rotate(-12deg) scale(1.08); }
+  92%  { transform: rotate(10deg) scale(1.08); }
+  96%  { transform: rotate(-5deg); }
+}
+#btn-survival span { animation: skull-wiggle 4s ease-in-out infinite; }
+
+/* Elevación al pasar el ratón por estadísticas y objetos de la tienda */
+.stat { transition: transform 0.2s ease, border-color 0.2s ease; }
+.stat:hover { transform: translateY(-3px); border-color: #333; }
+.shop-item { transition: border-color 0.2s, transform 0.2s ease; }
+.shop-item:hover { transform: translateY(-2px); }
+.setting-row { transition: border-color 0.2s, transform 0.2s ease; }
+.setting-row:hover { transform: translateY(-1px); border-color: #2e2e2e; }
+
+/* El nombre del color aparece deslizándose en la pantalla de memorizar */
+@keyframes name-rise {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.mem-color-name { animation: name-rise 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 0.35s backwards; }
+
+/* Los premios de la partida laten una vez al aparecer ya lo hace GSAP;
+   aquí solo el aro del marcador final gana un pulso sutil continuo */
+@keyframes ring-glow-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.82; }
+}
+.score-ring-fg { animation: ring-glow-pulse 2.6s ease-in-out 2s infinite; }
 
 .custom-scrollbar {
   scrollbar-width: thin;

@@ -274,9 +274,14 @@ const lowPowerMode = prefersReducedMotion;
 
 // ── Ajustes de rendimiento ────────────────────────────────────────────────────
 function defaultPerf() {
-  return isMobile
-    ? { particles: 'none', ambilight: false, glow: false, blur: false }
-    : { particles: 'high', ambilight: true,  glow: true,  blur: true  };
+  if (isMobile) return { particles: 'none', ambilight: false, glow: false, blur: false };
+  // En equipos modestos se conservan todas las animaciones, pero se arranca sin
+  // el desenfoque de cristal (apenas se aprecia: las tarjetas son 97% opacas y
+  // es lo más caro en GPUs antiguas) y con menos partículas.
+  const weakPC = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
+  return weakPC
+    ? { particles: 'low',  ambilight: true, glow: true, blur: false }
+    : { particles: 'high', ambilight: true, glow: true, blur: true  };
 }
 let perfSettings = (() => {
   try { return JSON.parse(localStorage.getItem('colorGamePerf')) || defaultPerf(); }
@@ -1044,10 +1049,20 @@ function buildMemorize(color) {
     { scale: 1, opacity: 1, delay: 0.25, duration: 0.5, ease: 'back.out(1.7)' }
   );
 
-  const glowTween = lowPowerMode ? null : gsap.to(el, {
-    boxShadow: `0 0 80px ${hsvToCss(color.h, color.s, color.v)}55, 0 40px 100px rgba(0,0,0,0.7)`,
-    repeat: -1, yoyo: true, duration: 1.2, ease: 'sine.inOut',
-  });
+  // Halo pulsante sin animar box-shadow (animarlo repinta toda la tarjeta en
+  // cada frame): la sombra vive en una capa hermana fija bajo la tarjeta y
+  // solo se anima su opacidad, que la GPU compone gratis.
+  let glowEl = null;
+  if (!lowPowerMode) {
+    glowEl = document.createElement('div');
+    glowEl.className = 'mem-glow';
+    // hsl() con alfa válido (pegar "66" hex a un hsl() es CSS inválido fuera de GSAP)
+    const glowColor = hsvToCss(color.h, color.s, color.v).replace('hsl(', 'hsla(').replace(')', ',0.4)');
+    glowEl.style.boxShadow = `0 0 80px ${glowColor}, 0 40px 100px rgba(0,0,0,0.7)`;
+    app.insertBefore(glowEl, el);
+  }
+  const glowTween = glowEl ? gsap.fromTo(glowEl, { opacity: 0.25 },
+    { opacity: 1, repeat: -1, yoyo: true, duration: 1.2, ease: 'sine.inOut' }) : null;
 
   gsap.to('#t-fill', { strokeDashoffset: C, duration: secs, ease: 'none' });
 
@@ -1062,8 +1077,8 @@ function buildMemorize(color) {
       { scale: 1.8, opacity: 1 },
       { scale: 1, opacity: 0.8, duration: 0.6, ease: 'power2.out', force3D: true }
     );
-    if (!lowPowerMode) {
-      gsap.fromTo(el, { boxShadow: `0 0 80px ${hsvToCss(color.h, color.s, color.v)}77` }, { boxShadow: '0 40px 100px rgba(0,0,0,0.7)', duration: 0.6 });
+    if (glowEl) {
+      gsap.fromTo(glowEl, { opacity: 1 }, { opacity: 0.25, duration: 0.6 });
     }
     playTone(300, 'sine', 0.1, 0.03);
     
@@ -1071,6 +1086,10 @@ function buildMemorize(color) {
       done = true;
       clearInterval(timerIv); timerIv = null;
       if (glowTween) glowTween.kill();
+      if (glowEl) {
+        gsap.killTweensOf(glowEl);
+        gsap.to(glowEl, { opacity: 0, duration: 0.3, onComplete: () => glowEl.remove() });
+      }
       gsap.killTweensOf(el);
       gsap.to(el, {
         rotationY: -90, opacity: 0, duration: 0.4, ease: 'power2.in',
@@ -1219,10 +1238,12 @@ function updatePicker() {
       if (!ambi) {
         ambi = document.createElement('div');
         ambi.id = 'ambilight';
-        ambi.style.cssText = 'position:fixed; top:50%; left:50%; width:90vw; height:90vh; transform:translate(-50%,-50%); border-radius:50%; filter:blur(120px); opacity:0.25; pointer-events:none; z-index:-1; transition: background 0.1s ease-out;';
+        // Sin filter:blur(120px): un degradado radial produce el mismo halo
+        // difuso y cuesta muchísimo menos en GPUs antiguas.
+        ambi.style.cssText = 'position:fixed; top:50%; left:50%; width:120vw; height:120vh; transform:translate(-50%,-50%); opacity:0.25; pointer-events:none; z-index:-1;';
         document.body.appendChild(ambi);
       }
-      ambi.style.background = isBlind ? 'transparent' : hsvToCss(P.h, 100, 50);
+      ambi.style.background = isBlind ? 'transparent' : `radial-gradient(closest-side, ${hsvToCss(P.h, 100, 50)}, transparent)`;
     }
     lastPickerPaint = { h: P.h, s: P.s, v: P.v, blind: isBlind };
     
@@ -2316,23 +2337,58 @@ function initParticles() {
   pCanvas.width = window.innerWidth;
   pCanvas.height = window.innerHeight;
   const count = perfSettings.particles === 'low' ? 30 : 55;
-  particles = Array.from({ length: count }, () => {
-    const theme = stats.activeTheme;
-    return {
-      x: Math.random() * pCanvas.width,
-      y: Math.random() * pCanvas.height,
-      r: Math.random() * 2.5 + 1.2,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: -(Math.random() * 0.8 + 0.2),
-      alpha: Math.random() * 0.5 + 0.3,
-      phase: Math.random() * Math.PI * 2,
-      hueOffset: (Math.random() - 0.5) * 30 // Variación de tono para cada partícula
-    };
-  });
+  particles = Array.from({ length: count }, () => ({
+    x: Math.random() * pCanvas.width,
+    y: Math.random() * pCanvas.height,
+    // Radio y tono cuantizados en pasos: así muchas partículas comparten sprite.
+    r: Math.round((Math.random() * 2.5 + 1.2) * 2) / 2,
+    vx: (Math.random() - 0.5) * 0.4,
+    vy: -(Math.random() * 0.8 + 0.2),
+    alpha: Math.random() * 0.5 + 0.3,
+    phase: Math.random() * Math.PI * 2,
+    hueOffset: Math.round(((Math.random() - 0.5) * 30) / 6) * 6 // Variación de tono para cada partícula
+  }));
+}
+
+// El brillo (shadowBlur) por partícula era, con diferencia, lo más caro de
+// pintar en cada frame. Ahora cada combinación forma+color+radio se rasteriza
+// UNA sola vez en un mini-canvas y luego solo se copia con drawImage (barato).
+const pSprites = new Map();
+function getSprite(shape, color, r) {
+  const key = shape + '|' + color + '|' + r;
+  let sp = pSprites.get(key);
+  if (sp) return sp;
+  if (pSprites.size > 240) pSprites.clear();
+  const blur = isMobile ? 0 : (shape === 'flame' ? 15 : 10);
+  const pad = blur + 3;
+  const w = Math.ceil((shape === 'leaf' ? r * 3.6 : r * 2) + pad * 2);
+  const h = Math.ceil((shape === 'leaf' ? r * 1.6 : (shape === 'flame' ? r * 2.5 : r * 2)) + pad * 2);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.strokeStyle = color;
+  x.shadowColor = color; x.shadowBlur = blur;
+  const cx = w / 2, cy = h / 2;
+  if (shape === 'leaf') {
+    x.beginPath(); x.ellipse(cx, cy, r * 1.8, r * 0.8, 0, 0, Math.PI * 2); x.fill();
+  } else if (shape === 'bubble') {
+    x.lineWidth = 1.5;
+    x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.stroke();
+  } else if (shape === 'flame') {
+    x.beginPath();
+    x.moveTo(cx, cy - r * 1.25);
+    x.lineTo(cx - r, cy + r * 1.25);
+    x.lineTo(cx + r, cy + r * 1.25);
+    x.closePath(); x.fill();
+  } else { // 'dot' y burbujas rellenas
+    x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
+  }
+  sp = { c, hw: w / 2, hh: h / 2 };
+  pSprites.set(key, sp);
+  return sp;
 }
 
 let pPaused = false;
-let lastPColorStr = '';
 let lastPDraw = 0;
 function drawParticles(now) {
   if (!pCanvas || pPaused || perfSettings.particles === 'none') return;
@@ -2349,65 +2405,49 @@ function drawParticles(now) {
     ? hsvToCss(pActiveColor.h, pActiveColor.s, pActiveColor.v)
     : (theme ? THEME_COLORS[theme] : '#888888');
   
-  pCtx.shadowBlur = isMobile ? 0 : (theme === 'themeFire' ? 15 : 10);
-  
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
     pCtx.globalAlpha = p.alpha;
-    
+
     // Variación de color por partícula para temas naturales
+    // (luminosidad cuantizada en pasos de 5 para reutilizar sprites)
     let pColor = baseColor;
+    const light = 50 + Math.round(p.alpha * 4) * 5;
     if (theme === 'themeForest' && !pActiveColor) {
-      pColor = `hsl(${140 + p.hueOffset}, 45%, ${50 + (p.alpha * 20)}%)`;
+      pColor = `hsl(${140 + p.hueOffset}, 45%, ${light}%)`;
     } else if (theme === 'themeFire' && !pActiveColor) {
-      pColor = `hsl(${20 + p.hueOffset}, 85%, ${50 + (p.alpha * 20)}%)`;
+      pColor = `hsl(${20 + p.hueOffset}, 85%, ${light}%)`;
     }
 
-    pCtx.fillStyle = pColor;
-    pCtx.strokeStyle = pColor;
-    pCtx.shadowColor = pColor;
-    
     const sway = Math.sin(now / 1200 + p.phase) * 0.3;
-    
+
     if (theme === 'themeForest') {
       // HOJAS: Elipses rotando suavemente
+      const sp = getSprite('leaf', pColor, p.r);
       pCtx.save();
       pCtx.translate(p.x, p.y);
       pCtx.rotate(p.phase + now / 1500);
-      pCtx.beginPath();
-      pCtx.ellipse(0, 0, p.r * 1.8, p.r * 0.8, 0, 0, Math.PI * 2);
-      pCtx.fill();
+      pCtx.drawImage(sp.c, -sp.hw, -sp.hh);
       pCtx.restore();
-    } 
+    }
     else if (theme === 'themeOcean') {
       // BURBUJAS: Círculos con borde y algunos rellenos
-      pCtx.beginPath();
-      pCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      if (i % 2 === 0) {
-        pCtx.lineWidth = 1.5;
-        pCtx.stroke();
-      } else {
-        pCtx.fill();
-      }
+      const sp = getSprite(i % 2 === 0 ? 'bubble' : 'dot', pColor, p.r);
+      pCtx.drawImage(sp.c, p.x - sp.hw, p.y - sp.hh);
     }
     else if (theme === 'themeFire') {
       // CHISPAS: Triángulos/Llamas que parpadean
       const flicker = Math.sin(now / 80 + p.phase) * 0.3 + 0.7;
       pCtx.globalAlpha = p.alpha * flicker;
-      pCtx.beginPath();
-      pCtx.moveTo(p.x, p.y - p.r * 2.5);
-      pCtx.lineTo(p.x - p.r, p.y);
-      pCtx.lineTo(p.x + p.r, p.y);
-      pCtx.closePath();
-      pCtx.fill();
+      const sp = getSprite('flame', pColor, p.r);
+      pCtx.drawImage(sp.c, p.x - sp.hw, (p.y - p.r * 1.25) - sp.hh);
     }
     else {
       // PUNTOS: El efecto premium por defecto
-      pCtx.beginPath();
-      pCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      pCtx.fill();
+      const sp = getSprite('dot', pColor, p.r);
+      pCtx.drawImage(sp.c, p.x - sp.hw, p.y - sp.hh);
     }
-    
+
     // FÍSICA
     const speedMult = theme === 'themeFire' ? 1.8 : (theme === 'themeOcean' ? 0.7 : 1);
     p.x += (p.vx + sway) * speedMult; 
