@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+
+# Config local de Claude Code
+.claude/settings.local.json
+
+# Copias de seguridad
+*.bak
