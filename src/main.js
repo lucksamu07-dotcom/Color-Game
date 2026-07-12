@@ -256,6 +256,8 @@ if (stats.activeTheme === undefined) stats.activeTheme = null;
 if (!stats.unlockedTitles) stats.unlockedTitles = [];
 if (stats.activeTitle === undefined) stats.activeTitle = null;
 if (stats.premiumConfetti === undefined) stats.premiumConfetti = false;
+if (!stats.unlockedAch) stats.unlockedAch = {};   // logros: id → fecha de desbloqueo
+if (!stats.c) stats.c = {};                       // contadores acumulados para logros
 
 function getXPNeeded(lvl) { return Math.floor(100 * Math.pow(lvl, 1.5)); }
 
@@ -754,6 +756,7 @@ function buildStart() {
   const calendarSVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`;
   const wallSVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>`;
   const shopSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>`;
+  const trophySVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>`;
   const gearSVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
 
   const letters = 'color'.split('').map(l => `<span class="title-letter">${l}</span>`).join('');
@@ -783,6 +786,7 @@ function buildStart() {
       </div>
     </div>
     <button id="btn-history" class="btn-icon" style="position:absolute; top:56px; right:24px;" title="Muro de Historial" aria-label="Historial de partidas">${wallSVG}</button>
+    <button id="btn-ach" class="btn-icon" style="position:absolute; top:92px; right:24px;" title="Logros" aria-label="Logros">${trophySVG}</button>
     <button id="btn-shop" class="btn-icon${activePowerUps > 0 ? ' btn-icon--badge' : ''}" style="position:absolute; top:56px; left:24px;" title="Tienda de Tinta" aria-label="Abrir tienda">${shopSVG}${activePowerUps > 0 ? `<span class="shop-badge">${activePowerUps}</span>` : ''}</button>
     <div class="title-row">${letters}</div>
     <div class="daily-palette" aria-hidden="true">${dailyPaletteHtml}</div>
@@ -845,6 +849,12 @@ function buildStart() {
     playClick();
     el.remove(); stopTaglines();
     buildHistory();
+  });
+
+  document.getElementById('btn-ach').addEventListener('click', () => {
+    playClick();
+    el.remove(); stopTaglines();
+    buildAchievements();
   });
 
   document.getElementById('btn-shop').addEventListener('click', () => {
@@ -1413,10 +1423,12 @@ function submitGuess() {
     finalSc = rawSc === 10 ? 10 : Math.min(9.99, rawSc * mult);
     const perc = Math.round((mult - 1) * 100);
     if (perc > 0) bonusStr = `+${perc}% Bonus Vel.`;
+    if (perc >= 12 && finalSc >= 9) G.fastNine = true; // para el logro Rayo Veloz
   }
 
   if (finalSc >= 9.0) G.combo++;
   else G.combo = 0;
+  if (G.combo > (G.maxCombo || 0)) G.maxCombo = G.combo;
 
   if (G.combo >= 2) {
     playCombo(G.combo);
@@ -1698,6 +1710,19 @@ function buildFinal() {
   const perfects = G.scores.filter(s => s >= 9.5).length;
   const bestRound = Math.max(...G.scores);
   const awards = getSessionAwards(avg, perfects, bestRound, numRounds);
+
+  // Logros: acumular contadores y comprobar desbloqueos de esta partida
+  stats.c.totalRounds = (stats.c.totalRounds || 0) + numRounds;
+  stats.c.perfectRounds = (stats.c.perfectRounds || 0) + perfects;
+  stats.c.exact10 = (stats.c.exact10 || 0) + G.scores.filter(x => x >= 9.995).length;
+  stats.c.maxCombo = Math.max(stats.c.maxCombo || 0, G.maxCombo || 0);
+  stats.c.inkEarned = (stats.c.inkEarned || 0) + earnedInk;
+  if (G.mode === 'survival') stats.c.bestSurvival = Math.max(stats.c.bestSurvival || 0, numRounds);
+  if (G.mode === 'challenge') stats.c.challenges = (stats.c.challenges || 0) + 1;
+  const newAch = checkAchievements({
+    avg, scores: G.scores, perfects, numRounds, mode: G.mode,
+    maxCombo: G.maxCombo || 0, blind: DIFFS[diffIdx].blind, fastNine: !!G.fastNine,
+  });
   const awardsHtml = awards.map(a => `
     <div class="award-chip award-chip--${a.tone}">
       <span>${a.label}</span>
@@ -1798,6 +1823,7 @@ function buildFinal() {
   gsap.to('#btn-replay',  { y: 0, opacity: 1, delay: 1.1, duration: 0.4, ease: 'back.out(1.5)' });
 
   if (avg >= 7) launchConfetti(avg);
+  if (newAch.length) showAchToasts(newAch);
 
   document.getElementById('btn-share').addEventListener('click', shareResult);
   
@@ -1970,6 +1996,117 @@ function buildHistory() {
       el.remove();
       buildStart();
     }});
+  });
+}
+
+// ── LOGROS ───────────────────────────────────────────────────────────────────
+// check(s, c, g): s = stats, c = stats.c (contadores), g = contexto de la
+// partida recién terminada (o null si se comprueba fuera de una partida).
+
+const ACHIEVEMENTS = [
+  { id: 'first',      icon: '🎨', name: 'Primer Chapuzón',        desc: 'Juega tu primera partida.', ink: 20,  check: (s) => s.gamesPlayed >= 1 },
+  { id: 'games10',    icon: '🖌️', name: 'Pintor Aficionado',      desc: 'Juega 10 partidas.', ink: 40,  check: (s) => s.gamesPlayed >= 10 },
+  { id: 'games50',    icon: '🎭', name: 'Veterano del Color',     desc: 'Juega 50 partidas.', ink: 120, check: (s) => s.gamesPlayed >= 50 },
+  { id: 'games200',   icon: '🏛️', name: 'Leyenda Viva',           desc: 'Juega 200 partidas.', ink: 400, check: (s) => s.gamesPlayed >= 200 },
+  { id: 'avg7',       icon: '✨', name: 'Buen Ojo',               desc: 'Termina una partida con media 7.00 o más.', ink: 30,  check: (s, c, g) => g && g.avg >= 7 },
+  { id: 'avg85',      icon: '🔮', name: 'Visión Cromática',       desc: 'Termina una partida con media 8.50 o más.', ink: 60,  check: (s, c, g) => g && g.avg >= 8.5 },
+  { id: 'avg95',      icon: '🌈', name: 'Pantone Humano',         desc: 'Termina una partida con media 9.50 o más.', ink: 200, check: (s, c, g) => g && g.avg >= 9.5 },
+  { id: 'perfect1',   icon: '💎', name: 'Ronda Perfecta',         desc: 'Consigue 9.50 o más en una ronda.', ink: 25,  check: (s, c) => (c.perfectRounds || 0) >= 1 },
+  { id: 'perfect25',  icon: '💠', name: 'Cazador de Perfectas',   desc: 'Acumula 25 rondas de 9.50 o más.', ink: 150, check: (s, c) => (c.perfectRounds || 0) >= 25 },
+  { id: 'exact10',    icon: '🎯', name: 'Diana Absoluta',         desc: 'Clava un 10.00 exacto en una ronda.', ink: 250, check: (s, c) => (c.exact10 || 0) >= 1 },
+  { id: 'allgood',    icon: '🖐️', name: 'Mano Firme',             desc: 'Termina las 5 rondas con 8.00 o más.', ink: 80,  check: (s, c, g) => g && g.scores.length >= 5 && g.scores.every(x => x >= 8) },
+  { id: 'streak3',    icon: '🔥', name: 'Calentando',             desc: 'Racha de 3 días en el Desafío Diario.', ink: 50,  check: (s) => s.streak >= 3 },
+  { id: 'streak7',    icon: '⚡', name: 'Semana Cromática',       desc: 'Racha de 7 días en el Desafío Diario.', ink: 120, check: (s) => s.streak >= 7 },
+  { id: 'streak30',   icon: '🌋', name: 'Imparable',              desc: 'Racha de 30 días en el Desafío Diario.', ink: 500, check: (s) => s.streak >= 30 },
+  { id: 'daily10',    icon: '📅', name: 'Fiel al Diario',         desc: 'Juega 10 desafíos diarios.', ink: 80,  check: (s) => Object.keys(s.dailyPlayed || {}).length >= 10 },
+  { id: 'surv8',      icon: '☠️', name: 'Superviviente',          desc: 'Alcanza la ronda 8 en Supervivencia.', ink: 60,  check: (s, c) => (c.bestSurvival || 0) >= 8 },
+  { id: 'surv15',     icon: '💀', name: 'Inmortal',               desc: 'Alcanza la ronda 15 en Supervivencia.', ink: 150, check: (s, c) => (c.bestSurvival || 0) >= 15 },
+  { id: 'combo3',     icon: '🎇', name: 'En Racha',               desc: 'Encadena un combo x3.', ink: 40,  check: (s, c) => (c.maxCombo || 0) >= 3 },
+  { id: 'combo5',     icon: '🎆', name: 'Modo Dios',              desc: 'Encadena un combo x5.', ink: 120, check: (s, c) => (c.maxCombo || 0) >= 5 },
+  { id: 'level5',     icon: '⭐', name: 'Subiendo',               desc: 'Alcanza el nivel 5.', ink: 50,  check: (s) => s.level >= 5 },
+  { id: 'level10',    icon: '🌟', name: 'Estrella',               desc: 'Alcanza el nivel 10.', ink: 150, check: (s) => s.level >= 10 },
+  { id: 'blind7',     icon: '🕶️', name: 'Sexto Sentido',          desc: 'Media de 7.00 o más en dificultad A ciegas.', ink: 180, check: (s, c, g) => g && g.blind && g.avg >= 7 },
+  { id: 'ink1000',    icon: '💧', name: 'Fuente de Tinta',        desc: 'Gana 1000 gotas de tinta en total.', ink: 100, check: (s, c) => (c.inkEarned || 0) >= 1000 },
+  { id: 'spender',    icon: '🛍️', name: 'Cliente VIP',            desc: 'Gasta 800 gotas en la tienda.', ink: 80,  check: (s, c) => (c.inkSpent || 0) >= 800 },
+  { id: 'themes3',    icon: '🎪', name: 'Decorador',              desc: 'Posee 3 temas de la tienda.', ink: 120, check: (s) => (s.unlockedThemes || []).length >= 3 },
+  { id: 'disaster',   icon: '🙈', name: 'Día de Furia',           desc: 'Puntúa menos de 2.00 en una ronda… nos pasa a todos.', ink: 15, check: (s, c, g) => g && g.scores.some(x => x < 2) },
+  { id: 'challenger', icon: '⚔️', name: 'Retador',                desc: 'Juega el reto de un amigo.', ink: 40,  check: (s, c) => (c.challenges || 0) >= 1 },
+  { id: 'speed',      icon: '🚀', name: 'Rayo Veloz',             desc: 'Nota 9+ con bonus de velocidad del 12% o más.', ink: 90,  check: (s, c, g) => g && g.fastNine },
+];
+
+function checkAchievements(g) {
+  const unlocked = [];
+  let inkGain = 0;
+  for (const a of ACHIEVEMENTS) {
+    if (stats.unlockedAch[a.id]) continue;
+    let ok = false;
+    try { ok = !!a.check(stats, stats.c || {}, g); } catch (_) {}
+    if (ok) {
+      stats.unlockedAch[a.id] = Date.now();
+      inkGain += a.ink;
+      unlocked.push(a);
+    }
+  }
+  if (unlocked.length) {
+    stats.ink = (stats.ink || 0) + inkGain;
+    saveStats();
+  }
+  return unlocked;
+}
+
+function showAchToasts(list, startDelay = 1200) {
+  list.forEach((a, i) => {
+    setTimeout(() => {
+      const t = document.createElement('div');
+      t.className = 'ach-toast';
+      t.innerHTML = `<span class="ach-toast-icon">${a.icon}</span>
+        <span class="ach-toast-info"><strong>¡Logro desbloqueado!</strong>${a.name} <em>+${a.ink} 💧</em></span>`;
+      document.body.appendChild(t);
+      playSuccess();
+      vibrate(40);
+      gsap.fromTo(t, { y: -70, opacity: 0, scale: 0.92 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: 'back.out(1.8)' });
+      gsap.to(t, { y: -70, opacity: 0, duration: 0.35, delay: 3, ease: 'power2.in', onComplete: () => t.remove() });
+      setTimeout(() => t.remove(), 4200); // red de seguridad
+    }, startDelay + i * 3400);
+  });
+}
+
+function buildAchievements() {
+  const el = document.createElement('div');
+  el.className = 'card shop-card';
+  const total = ACHIEVEMENTS.length;
+  const got = Object.keys(stats.unlockedAch || {}).length;
+  const rows = ACHIEVEMENTS.map(a => {
+    const un = !!stats.unlockedAch[a.id];
+    return `
+      <div class="ach-item${un ? ' unlocked' : ''}">
+        <div class="ach-icon">${un ? a.icon : '🔒'}</div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">${a.name}</div>
+          <div class="shop-item-desc">${a.desc}</div>
+        </div>
+        <div class="ach-reward${un ? ' done' : ''}">${un ? '✓' : `+${a.ink} <span class="ink-drop">💧</span>`}</div>
+      </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="shop-header">
+      <div class="shop-title">Logros</div>
+      <button id="btn-ach-close" class="btn-icon-close" aria-label="Cerrar logros">&times;</button>
+    </div>
+    <div class="ach-progress">
+      <span>${got} / ${total} desbloqueados</span>
+      <div class="ach-progress-bar"><div style="width:${Math.round(got / total * 100)}%"></div></div>
+    </div>
+    <div class="custom-scrollbar" style="overflow-y:auto; flex:1; padding-right:4px;">${rows}</div>
+  `;
+  app.appendChild(el);
+  gsap.fromTo(el, { y: 60, opacity: 0, scale: 0.97 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, ease: 'back.out(1.5)' });
+  const items = el.querySelectorAll('.ach-item');
+  gsap.set(items, { x: 24, opacity: 0 });
+  gsap.to(items, { x: 0, opacity: 1, stagger: 0.03, delay: 0.15, duration: 0.3, ease: 'power2.out' });
+  document.getElementById('btn-ach-close').addEventListener('click', () => {
+    playClick();
+    gsap.to(el, { y: 20, opacity: 0, duration: 0.2, onComplete: () => { el.remove(); buildStart(); } });
   });
 }
 
@@ -2210,6 +2347,7 @@ function buildShop() {
       if (!alreadyOwned) {
         if ((stats.ink || 0) < price) return;
         stats.ink -= price;
+        stats.c.inkSpent = (stats.c.inkSpent || 0) + price;
         stats[unlockedKey] = [...(stats[unlockedKey] || []), itemId];
       }
       stats[activeKey] = itemId;
@@ -2221,6 +2359,7 @@ function buildShop() {
     if (itemType === 'oneshot') {
       if ((stats.ink || 0) < price || stats[stat]) return;
       stats.ink -= price;
+      stats.c.inkSpent = (stats.c.inkSpent || 0) + price;
       stats[stat] = true;
       saveStats(); playSuccess(); vibrate(30);
       gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
@@ -2230,6 +2369,7 @@ function buildShop() {
     if ((stats.ink || 0) < price) return;
     if (itemDef?.maxStack !== undefined && (stats[stat] || 0) >= itemDef.maxStack) return;
     stats.ink -= price;
+    stats.c.inkSpent = (stats.c.inkSpent || 0) + price;
     stats[stat] = (stats[stat] || 0) + perPurchase;
     saveStats();
     playSuccess();

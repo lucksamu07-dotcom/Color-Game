@@ -1197,6 +1197,61 @@ body::after {
   pointer-events: none;
 }
 
+/* ── LOGROS ───────────────────────────────────── */
+.ach-progress {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 0 6px; font-size: 0.75rem; color: #888; font-weight: 700;
+}
+.ach-progress-bar {
+  height: 8px; background: #1c1c1c; border-radius: 99px;
+  overflow: hidden; border: 1px solid #262626;
+}
+.ach-progress-bar > div {
+  height: 100%; border-radius: inherit;
+  background: linear-gradient(90deg, #ffd93d, #ffb84d);
+  box-shadow: 0 0 12px rgba(255,217,61,0.4);
+  transition: width 0.4s ease;
+}
+.ach-item {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px; background: #161616; border-radius: 14px;
+  margin-bottom: 8px; border: 1px solid #202020; opacity: 0.55;
+}
+.ach-item.unlocked {
+  opacity: 1;
+  border-color: rgba(255,217,61,0.28);
+  background: linear-gradient(135deg, rgba(255,217,61,0.06), #161616 60%);
+}
+.ach-icon {
+  font-size: 1.5rem; width: 44px; height: 44px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: #222; border-radius: 12px;
+}
+.ach-item.unlocked .ach-icon { background: rgba(255,217,61,0.12); }
+.ach-reward {
+  flex-shrink: 0; font-size: 0.72rem; font-weight: 800; color: #888;
+  display: flex; align-items: center; gap: 4px; white-space: nowrap;
+}
+.ach-reward.done { color: #4cd964; font-size: 1rem; }
+
+.ach-toast {
+  position: fixed;
+  top: max(16px, calc(env(safe-area-inset-top, 0px) + 12px));
+  left: 50%; transform: translateX(-50%);
+  z-index: 6000;
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(22,22,22,0.97);
+  border: 1px solid rgba(255,217,61,0.45); border-radius: 16px;
+  padding: 12px 18px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 24px rgba(255,217,61,0.15);
+  pointer-events: none;
+  max-width: min(92vw, 380px);
+}
+.ach-toast-icon { font-size: 1.7rem; }
+.ach-toast-info { display: flex; flex-direction: column; font-size: 0.85rem; font-weight: 800; color: #fff; }
+.ach-toast-info strong { font-size: 0.62rem; color: #ffd93d; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 2px; }
+.ach-toast-info em { font-style: normal; color: #00d0ff; font-size: 0.72rem; margin-top: 2px; }
+
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: #2a2a2a transparent;
