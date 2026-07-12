@@ -1927,6 +1927,89 @@ function colorEmoji(h) {
   return '🟪';
 }
 
+// ── TARJETA-IMAGEN PARA COMPARTIR ────────────────────────────────────────────
+
+function drawRoundRect(ctx, rx, ry, rw, rh, rr) {
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(rx, ry, rw, rh, rr);
+  else {
+    ctx.moveTo(rx + rr, ry);
+    ctx.arcTo(rx + rw, ry, rx + rw, ry + rh, rr);
+    ctx.arcTo(rx + rw, ry + rh, rx, ry + rh, rr);
+    ctx.arcTo(rx, ry + rh, rx, ry, rr);
+    ctx.arcTo(rx, ry, rx + rw, ry, rr);
+    ctx.closePath();
+  }
+}
+
+function renderShareCard() {
+  const W = 1080, H = 1350;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const x = c.getContext('2d');
+
+  x.fillStyle = '#0d0d10';
+  x.fillRect(0, 0, W, H);
+  const grad = x.createLinearGradient(0, 0, W, 0);
+  ['#ff416c', '#ffd166', '#4cd964', '#45dcff', '#8b5cf6'].forEach((col, i, arr) => grad.addColorStop(i / (arr.length - 1), col));
+  x.fillStyle = grad;
+  x.fillRect(0, 0, W, 14);
+
+  x.fillStyle = '#ffffff';
+  x.font = '900 96px Inter, sans-serif';
+  x.textAlign = 'center';
+  x.fillText('color', W / 2, 155);
+  const modeNames = { daily: 'Desafío Diario', survival: 'Muerte Súbita', timed: 'Contrarreloj', zen: 'Modo Zen', inverse: 'Modo Inverso', challenge: 'Reto', practice: 'Práctica' };
+  x.fillStyle = '#888';
+  x.font = '700 34px Inter, sans-serif';
+  x.fillText(`${modeNames[G.mode] || 'Partida'} · ${new Date().toLocaleDateString()}`, W / 2, 212);
+
+  // Filas: tu color (izquierda) frente al objetivo (derecha) + nota
+  const rows = G.colors.slice(0, 6);
+  const rowH = 92, gap = 24, rowW = 720;
+  const rx = (W - rowW) / 2 - 55;
+  let ry = 300;
+  x.font = '800 26px Inter, sans-serif';
+  x.fillStyle = '#666';
+  x.textAlign = 'left';
+  x.fillText('TÚ', rx + 10, ry - 16);
+  x.textAlign = 'right';
+  x.fillText('OBJETIVO', rx + rowW - 10, ry - 16);
+  rows.forEach((t, i) => {
+    const gcol = G.guesses[i];
+    const sc = G.scores[i];
+    if (!gcol) return;
+    x.save();
+    drawRoundRect(x, rx, ry, rowW, rowH, 20);
+    x.clip();
+    x.fillStyle = hsvToCss(gcol.h, gcol.s, gcol.v);
+    x.fillRect(rx, ry, rowW / 2, rowH);
+    x.fillStyle = hsvToCss(t.h, t.s, t.v);
+    x.fillRect(rx + rowW / 2, ry, rowW / 2, rowH);
+    x.restore();
+    x.fillStyle = `hsl(${Math.round(sc * 12)},70%,62%)`;
+    x.font = '900 46px Inter, sans-serif';
+    x.textAlign = 'left';
+    x.fillText(sc.toFixed(1), rx + rowW + 28, ry + rowH / 2 + 17);
+    ry += rowH + gap;
+  });
+
+  const avg = G.scores.reduce((a, b) => a + b, 0) / Math.max(1, G.scores.length);
+  ry += 40;
+  x.textAlign = 'center';
+  x.fillStyle = `hsl(${Math.round(avg * 12)},70%,62%)`;
+  x.font = '900 168px Inter, sans-serif';
+  x.fillText(avg.toFixed(2), W / 2, ry + 150);
+  x.fillStyle = '#aaa';
+  x.font = '800 42px Inter, sans-serif';
+  x.fillText(getRank(avg), W / 2, ry + 228);
+
+  x.fillStyle = '#555';
+  x.font = '700 30px Inter, sans-serif';
+  x.fillText('¿Me superas? → colormemory.vercel.app', W / 2, H - 56);
+  return c;
+}
+
 function shareResult() {
   const dateStr = new Date().toLocaleDateString();
   let title = 'Color Game';
@@ -1952,16 +2035,36 @@ function shareResult() {
   link.searchParams.set('diff', diffIdx);
   text += `\n¡Te reto a superarme con mis colores!\n${link.toString()}`;
   
-  if (navigator.share) {
-    navigator.share({ title: 'Color Game', text: text }).catch(console.error);
-  } else {
+  // Imagen primero: tarjeta bonita para WhatsApp/Instagram; con degradado
+  // de alternativas según lo que soporte el navegador.
+  const canvas = renderShareCard();
+  canvas.toBlob(blob => {
+    const file = blob ? new File([blob], 'color-game.png', { type: 'image/png' }) : null;
+
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ title: 'Color Game', text, files: [file] }).catch(() => {});
+      return;
+    }
+    if (navigator.share) {
+      navigator.share({ title: 'Color Game', text }).catch(console.error);
+      return;
+    }
+    // Escritorio sin Web Share: descargar la imagen y copiar el texto del reto
+    if (blob) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'color-game.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
     navigator.clipboard.writeText(text).then(() => {
       const btn = document.getElementById('btn-share');
+      if (!btn) return;
       const orig = btn.innerHTML;
-      btn.innerHTML = '¡Copiado!';
-      setTimeout(() => btn.innerHTML = orig, 2000);
-    });
-  }
+      btn.innerHTML = '¡Imagen guardada + reto copiado!';
+      setTimeout(() => { btn.innerHTML = orig; }, 2200);
+    }).catch(() => {});
+  }, 'image/png');
 }
 
 // ── CANVAS EFFECTS (CONFETTI & EXPLOSION) ───────────────────────────────────
