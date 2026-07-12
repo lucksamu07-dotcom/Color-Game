@@ -794,7 +794,7 @@ function buildStart() {
     <div class="stats-row">
       <div class="stat"><div class="stat-val">${stats.bestScore.toFixed(2)}</div><div class="stat-lbl">Mejor</div></div>
       <div class="stat"><div class="stat-val">${stats.gamesPlayed}</div><div class="stat-lbl">Partidas</div></div>
-      <div class="stat"><div class="stat-val">${stats.streak}</div><div class="stat-lbl">Racha 🔥</div></div>
+      <button class="stat stat-btn" id="btn-calendar" title="Ver calendario del Desafío Diario" aria-label="Calendario del Desafío Diario"><div class="stat-val">${stats.streak}</div><div class="stat-lbl">Racha 🔥</div></button>
     </div>
     <div class="focus-card${focus.done ? ' done' : ''}">
       <div class="focus-kicker">${focus.done ? 'Completado hoy' : 'Objetivo de hoy'}</div>
@@ -855,6 +855,12 @@ function buildStart() {
     playClick();
     el.remove(); stopTaglines();
     buildAchievements();
+  });
+
+  document.getElementById('btn-calendar').addEventListener('click', () => {
+    playClick();
+    el.remove(); stopTaglines();
+    buildCalendar();
   });
 
   document.getElementById('btn-shop').addEventListener('click', () => {
@@ -1997,6 +2003,89 @@ function buildHistory() {
       buildStart();
     }});
   });
+}
+
+// ── CALENDARIO DEL DIARIO ────────────────────────────────────────────────────
+
+const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+function computeBestStreak() {
+  const days = Object.keys(stats.dailyPlayed || {});
+  if (!days.length) return 0;
+  const set = new Set(days);
+  let best = 0;
+  for (const d of days) {
+    const [y, m, dd] = d.split('-').map(Number);
+    const prev = new Date(y, m - 1, dd - 1);
+    if (set.has(`${prev.getFullYear()}-${prev.getMonth() + 1}-${prev.getDate()}`)) continue; // no es inicio de racha
+    let len = 1;
+    const cur = new Date(y, m - 1, dd + 1);
+    while (set.has(`${cur.getFullYear()}-${cur.getMonth() + 1}-${cur.getDate()}`)) {
+      len++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    best = Math.max(best, len);
+  }
+  return best;
+}
+
+function buildCalendar() {
+  const now = new Date();
+  const view = new Date(now.getFullYear(), now.getMonth(), 1);
+  const el = document.createElement('div');
+  el.className = 'card shop-card';
+  app.appendChild(el);
+
+  function render() {
+    const y = view.getFullYear(), m = view.getMonth();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const lead = (new Date(y, m, 1).getDay() + 6) % 7; // semana empezando en lunes
+    const todayKey = getTodayStr();
+    let cells = '';
+    for (let i = 0; i < lead; i++) cells += '<div class="cal-cell empty"></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = `${y}-${m + 1}-${d}`;
+      const score = stats.dailyPlayed?.[key];
+      const isToday = key === todayKey;
+      const isFuture = new Date(y, m, d) > now;
+      if (score !== undefined) {
+        const hue = Math.round((score / 10) * 120);
+        cells += `<div class="cal-cell played${isToday ? ' today' : ''}" style="background:hsla(${hue},70%,42%,0.9); border-color:hsl(${hue},70%,60%);" title="Nota del día: ${score.toFixed(2)}"><span>${d}</span><small>${score.toFixed(1)}</small></div>`;
+      } else {
+        cells += `<div class="cal-cell${isToday ? ' today' : ''}${isFuture ? ' future' : ''}"><span>${d}</span></div>`;
+      }
+    }
+    const played = Object.keys(stats.dailyPlayed || {}).length;
+    el.innerHTML = `
+      <div class="shop-header">
+        <div class="shop-title" style="font-size:1.5rem;">Desafío Diario</div>
+        <button id="btn-cal-close" class="btn-icon-close" aria-label="Cerrar calendario">&times;</button>
+      </div>
+      <div class="cal-nav">
+        <button id="cal-prev" class="cal-nav-btn" aria-label="Mes anterior">&#8249;</button>
+        <div class="cal-month">${MONTH_NAMES[m]} ${y}</div>
+        <button id="cal-next" class="cal-nav-btn" aria-label="Mes siguiente">&#8250;</button>
+      </div>
+      <div class="cal-grid cal-head">
+        ${['L','M','X','J','V','S','D'].map(d => `<div>${d}</div>`).join('')}
+      </div>
+      <div class="cal-grid">${cells}</div>
+      <div class="cal-stats">
+        <div class="stat"><div class="stat-val">${stats.streak} 🔥</div><div class="stat-lbl">Racha actual</div></div>
+        <div class="stat"><div class="stat-val">${computeBestStreak()}</div><div class="stat-lbl">Mejor racha</div></div>
+        <div class="stat"><div class="stat-val">${played}</div><div class="stat-lbl">Diarios jugados</div></div>
+      </div>
+    `;
+    document.getElementById('btn-cal-close').addEventListener('click', () => {
+      playClick();
+      gsap.to(el, { y: 20, opacity: 0, duration: 0.2, onComplete: () => { el.remove(); buildStart(); } });
+    });
+    document.getElementById('cal-prev').addEventListener('click', () => { playClick(); view.setMonth(view.getMonth() - 1); render(); });
+    document.getElementById('cal-next').addEventListener('click', () => { playClick(); view.setMonth(view.getMonth() + 1); render(); });
+  }
+
+  render();
+  gsap.fromTo(el, { y: 60, opacity: 0, scale: 0.97 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, ease: 'back.out(1.5)' });
 }
 
 // ── LOGROS ───────────────────────────────────────────────────────────────────

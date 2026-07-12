@@ -1197,6 +1197,34 @@ body::after {
   pointer-events: none;
 }
 
+/* ── CALENDARIO DEL DIARIO ────────────────────── */
+.stat-btn { font: inherit; color: inherit; text-align: center; }
+.stat-btn:hover { transform: translateY(-3px); border-color: #444; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; padding: 0 6px; }
+.cal-nav-btn {
+  width: 40px; height: 40px; min-height: 40px; border-radius: 12px;
+  border: 1px solid #2a2a2a; background: #161616; color: #aaa; font-size: 1.4rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s, transform 0.12s;
+}
+.cal-nav-btn:hover { background: #222; color: #fff; }
+.cal-nav-btn:active { transform: scale(0.92); }
+.cal-month { font-weight: 900; font-size: 1.05rem; letter-spacing: -0.5px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 0 2px; }
+.cal-head div { text-align: center; font-size: 0.62rem; color: #555; font-weight: 900; letter-spacing: 1px; }
+.cal-cell {
+  aspect-ratio: 1; border-radius: 10px;
+  background: #141414; border: 1px solid #202020;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+}
+.cal-cell span { font-size: 0.72rem; font-weight: 800; color: #666; }
+.cal-cell.empty { background: transparent; border: none; }
+.cal-cell.future { opacity: 0.35; }
+.cal-cell.today { border-color: #fff; border-width: 2px; }
+.cal-cell.played span { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+.cal-cell.played small { font-size: 0.58rem; font-weight: 900; color: rgba(255,255,255,0.92); text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.cal-stats { display: flex; gap: 10px; margin-top: 4px; }
+
 /* ── LOGROS ───────────────────────────────────── */
 .ach-progress {
   display: flex; flex-direction: column; gap: 6px;
