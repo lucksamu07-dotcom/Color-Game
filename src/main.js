@@ -197,6 +197,28 @@ function vibrate(ms) {
   if (navigator.vibrate) navigator.vibrate(ms);
 }
 
+// ── Explosión de puntitos de color al pulsar (juice barato: pocos nodos,
+//    solo transform+opacity, se autodestruyen). colors=null → arcoíris.
+function spawnBurst(x, y, opts = {}) {
+  if (prefersReducedMotion) return;
+  const n = opts.count || 10;
+  const colors = opts.colors || null;
+  for (let i = 0; i < n; i++) {
+    const d = document.createElement('div');
+    const size = 4 + Math.random() * 5;
+    const c = colors ? colors[i % colors.length] : `hsl(${Math.round(Math.random() * 360)},85%,62%)`;
+    d.style.cssText = `position:fixed; left:${x}px; top:${y}px; width:${size}px; height:${size}px; margin:-${size/2}px 0 0 -${size/2}px; border-radius:50%; background:${c}; pointer-events:none; z-index:5000; will-change:transform,opacity;`;
+    document.body.appendChild(d);
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 34 + Math.random() * 46;
+    gsap.fromTo(d, { x: 0, y: 0, scale: 1, opacity: 1 },
+      { x: Math.cos(ang) * dist, y: Math.sin(ang) * dist - 12, scale: 0.2, opacity: 0,
+        duration: 0.5 + Math.random() * 0.3, ease: 'power2.out', onComplete: () => d.remove() });
+    // Red de seguridad por si algo mata el tween (p.ej. salir al menú)
+    setTimeout(() => d.remove(), 1000);
+  }
+}
+
 const muteBtn = document.createElement('button');
 muteBtn.className = 'btn-mute';
 muteBtn.innerHTML = isMuted ? '🔇' : '🔊';
@@ -757,7 +779,7 @@ function buildStart() {
     <div style="position:absolute; top:24px; right:24px; text-align:right;">
       <div style="font-size:0.7rem; color:#888; font-weight:900; margin-bottom:4px;">NIVEL ${stats.level}</div>
       <div style="width:80px; height:6px; background:rgba(255,255,255,0.1); border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,0.05);">
-        <div style="width:${(stats.xp / getXPNeeded(stats.level) * 100).toFixed(0)}%; height:100%; background:linear-gradient(90deg, #4cd964, #aaffaa); box-shadow:0 0 10px rgba(76,217,100,0.5);"></div>
+        <div class="xp-fill" style="width:${(stats.xp / getXPNeeded(stats.level) * 100).toFixed(0)}%; height:100%; background:linear-gradient(90deg, #4cd964, #aaffaa); box-shadow:0 0 10px rgba(76,217,100,0.5);"></div>
       </div>
     </div>
     <button id="btn-history" class="btn-icon" style="position:absolute; top:56px; right:24px;" title="Muro de Historial" aria-label="Historial de partidas">${wallSVG}</button>
@@ -837,9 +859,11 @@ function buildStart() {
     buildSettings();
   });
 
-  document.getElementById('diff-chip').addEventListener('click', () => {
+  document.getElementById('diff-chip').addEventListener('click', (e) => {
     playClick();
     cycleDiff();
+    const r = e.currentTarget.getBoundingClientRect();
+    spawnBurst(r.left + r.width / 2, r.top + r.height / 2, { count: 6, colors: ['#ffffff', '#ffd93d'] });
   });
 
   if (isDailyLocked) {
@@ -905,6 +929,8 @@ function buildStart() {
       const mode = id.replace('btn-', '');
       playClick();
       playStartJingle(mode);
+      const br = btn.getBoundingClientRect();
+      spawnBurst(br.left + br.width / 2, br.top + br.height / 2, { count: 14 });
       document.querySelectorAll('.play').forEach(b => b.style.pointerEvents = 'none');
       stopShake();
       gsap.to(el, { x: 0, y: 0, rotation: 0, duration: 0.1 });
@@ -1164,10 +1190,12 @@ function buildGuess() {
       btnHint.title = 'Pista agotada';
       btnHint.style.opacity = '0.3';
       btnHint.style.cursor = 'not-allowed';
-      gsap.fromTo('#hue-thumb', 
-        { scale: 1.8, boxShadow: '0 0 30px #fff' }, 
+      gsap.fromTo('#hue-thumb',
+        { scale: 1.8, boxShadow: '0 0 30px #fff' },
         { scale: 1, boxShadow: '0 3px 10px rgba(0,0,0,0.55), 0 0 0 3px rgba(255,255,255,0.18)', duration: 0.6 }
       );
+      const hr = btnHint.getBoundingClientRect();
+      spawnBurst(hr.left + hr.width / 2, hr.top + hr.height / 2, { count: 10, colors: ['#ffd93d', '#fff7cc', '#ffb84d'] });
       playBeepHigh();
     }
   });
@@ -1219,7 +1247,10 @@ function updatePicker() {
     const thumbGlow = (isBlind || !perfSettings.glow) ? '0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px rgba(255,255,255,0.2)' : `0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px ${css}70, 0 0 12px ${css}60`;
     ['hue-thumb','sat-thumb','bri-thumb'].forEach(id => {
       const t = document.getElementById(id);
-      if (t) t.style.boxShadow = thumbGlow;
+      if (t) {
+        t.style.boxShadow = thumbGlow;
+        t.style.setProperty('--thumb-c', isBlind ? 'rgba(255,255,255,0.55)' : css);
+      }
     });
 
     if (satStrip && (lastPickerPaint.h !== P.h || lastPickerPaint.v !== P.v)) {
@@ -1261,17 +1292,21 @@ function setupDrag() {
     const thumb = document.getElementById(thumbId);
     if (!el) return;
     let active = false;
-    const start = e => { 
-      active = true; 
-      onMove(e); 
-      if (thumb) gsap.to(thumb, { scale: 1.25, duration: 0.2, ease: 'back.out(2)' });
+    const start = e => {
+      active = true;
+      onMove(e);
+      if (thumb) {
+        thumb.classList.add('dragging');
+        gsap.to(thumb, { scale: 1.25, duration: 0.2, ease: 'back.out(2)' });
+      }
     };
     const move  = e => { if (active) onMove(e); };
-    const stop  = ()  => { 
+    const stop  = ()  => {
       if (active && thumb) {
+        thumb.classList.remove('dragging');
         gsap.to(thumb, { scale: 1, duration: 0.4, ease: 'elastic.out(1, 0.4)' });
       }
-      active = false; 
+      active = false;
     };
     el.addEventListener('mousedown',  start, { signal: sig });
     el.addEventListener('touchstart', e => start(e.touches[0]), { passive: true, signal: sig });
@@ -1357,6 +1392,11 @@ function submitGuess() {
   if (dragCtrl) { dragCtrl.abort(); dragCtrl = null; }
   playPop();
   vibrate(15);
+  const sb = document.getElementById('btn-submit');
+  if (sb) {
+    const r = sb.getBoundingClientRect();
+    spawnBurst(r.left + r.width / 2, r.top + r.height / 2, { count: 12, colors: [hsvToCss(P.h, P.s, P.v), '#ffffff'] });
+  }
   
   const elapsed = (Date.now() - G.guessStartTime - 400) / 1000;
   gsap.killTweensOf('#bonus-fill');
@@ -1553,6 +1593,8 @@ function buildResult(target, guess, sc, bonusStr = '') {
   btnNext.addEventListener('click', () => {
     btnNext.style.pointerEvents = 'none';
     playSwish();
+    const nr = btnNext.getBoundingClientRect();
+    spawnBurst(nr.left + nr.width / 2, nr.top + nr.height / 2, { count: 10, colors: [`hsl(${Math.round(sc * 12)},75%,62%)`, '#ffffff'] });
 
     if (G.mode === 'survival') {
       if (sc < 7.5) {
@@ -2192,6 +2234,8 @@ function buildShop() {
     saveStats();
     playSuccess();
     vibrate(30);
+    const pr = btn.getBoundingClientRect();
+    spawnBurst(pr.left + pr.width / 2, pr.top + pr.height / 2, { count: 12, colors: ['#00d0ff', '#7ee8ff', '#ffffff'] });
 
     document.getElementById('shop-ink-count').textContent = renderInk();
 

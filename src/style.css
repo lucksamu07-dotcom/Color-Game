@@ -987,11 +987,20 @@ button:focus-visible,
   0%, 100% { transform: translateY(0); }
   50%      { transform: translateY(-4px); }
 }
-.title-letter { animation: letter-float 3.4s ease-in-out 1.2s infinite; }
-.title-letter:nth-child(2) { animation-delay: 1.5s; }
-.title-letter:nth-child(3) { animation-delay: 1.8s; }
-.title-letter:nth-child(4) { animation-delay: 2.1s; }
-.title-letter:nth-child(5) { animation-delay: 2.4s; }
+/* …y además cada letra recorre el arcoíris en bucle suave */
+@keyframes letter-rainbow {
+  0%, 100% { color: #ffffff; }
+  15% { color: #ff6b6b; }
+  32% { color: #ffd93d; }
+  50% { color: #6bcb77; }
+  68% { color: #45dcff; }
+  85% { color: #c77dff; }
+}
+.title-letter { animation: letter-float 3.4s ease-in-out 1.2s infinite, letter-rainbow 9s linear 2.2s infinite; }
+.title-letter:nth-child(2) { animation-delay: 1.5s, 2.9s; }
+.title-letter:nth-child(3) { animation-delay: 1.8s, 3.6s; }
+.title-letter:nth-child(4) { animation-delay: 2.1s, 4.3s; }
+.title-letter:nth-child(5) { animation-delay: 2.4s, 5s; }
 
 /* Destello que recorre la insignia de rango */
 @keyframes shine-sweep { 0%, 55% { transform: translateX(-160%); } 100% { transform: translateX(420%); } }
@@ -1064,6 +1073,129 @@ button:focus-visible,
   50%      { opacity: 0.82; }
 }
 .score-ring-fg { animation: ring-glow-pulse 2.6s ease-in-out 2s infinite; }
+
+/* ── ANIMACIONES DE COLOR (transform/opacity o áreas diminutas) ───────────── */
+
+/* Aurora de fondo: manchas de color que derivan lentamente por toda la página */
+@keyframes aurora-drift {
+  from { transform: translate3d(-2%, -1.5%, 0) scale(1); }
+  to   { transform: translate3d(2%, 1.5%, 0) scale(1.09); }
+}
+body::after {
+  content: "";
+  position: fixed; inset: -12%;
+  background:
+    radial-gradient(38% 32% at 22% 28%, rgba(255,65,108,0.10), transparent 70%),
+    radial-gradient(34% 30% at 78% 24%, rgba(69,220,255,0.09), transparent 70%),
+    radial-gradient(36% 34% at 70% 76%, rgba(139,92,246,0.10), transparent 70%),
+    radial-gradient(30% 28% at 26% 74%, rgba(76,217,100,0.08), transparent 70%);
+  pointer-events: none; z-index: 0;
+  animation: aurora-drift 26s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+/* Anillo de color respirando dentro de los botones de jugar */
+@keyframes ring-hue {
+  0%, 100% { border-color: #ff6b6b; opacity: 0.5; }
+  20% { border-color: #ffd93d; }
+  40% { border-color: #6bcb77; }
+  50% { opacity: 0.28; }
+  60% { border-color: #45dcff; }
+  80% { border-color: #c77dff; }
+}
+.action-btn.play::before {
+  content: "";
+  position: absolute; inset: 3px; border-radius: 50%;
+  border: 2px solid #ff6b6b;
+  animation: ring-hue 6s linear infinite;
+  pointer-events: none;
+}
+#btn-survival::before { animation-delay: -2s; }
+#btn-daily::before    { animation-delay: -4s; }
+
+/* Los puntos de dificultad activos ciclan por colores */
+@keyframes dot-hue {
+  0%, 100% { background: #ffffff; }
+  25% { background: #ffd93d; }
+  50% { background: #6bcb77; }
+  75% { background: #45dcff; }
+}
+.diff-dot.on { animation: dot-hue 4s linear infinite; }
+.diff-dot:nth-child(2).on { animation-delay: -1s; }
+.diff-dot:nth-child(3).on { animation-delay: -2s; }
+.diff-dot:nth-child(4).on { animation-delay: -3s; }
+
+/* Destello que recorre la barra de experiencia */
+.xp-fill { position: relative; overflow: hidden; }
+.xp-fill::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 25%, rgba(255,255,255,0.55) 50%, transparent 75%);
+  transform: translateX(-160%);
+  animation: shine-sweep 2.8s ease-in-out infinite;
+}
+
+/* Texto arcoíris en el aviso de COMBO (el brillo del glow se mantiene) */
+@keyframes combo-rainbow { to { background-position: -300% 0; } }
+.combo-popup {
+  background: linear-gradient(90deg, #ff6b6b, #ffd93d, #6bcb77, #45dcff, #c77dff, #ff6b6b);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: combo-rainbow 1.2s linear infinite;
+}
+
+/* Gleam que barre la caja de previsualización mientras eliges color */
+.preview-box::after {
+  content: "";
+  position: absolute; top: -20%; bottom: -20%; left: 0; width: 34%;
+  background: linear-gradient(105deg, transparent, rgba(255,255,255,0.10), transparent);
+  transform: translateX(-160%) rotate(6deg);
+  animation: shine-sweep 5.5s ease-in-out 1.2s infinite;
+  pointer-events: none;
+}
+
+/* Halo arcoíris girando tras el aro de puntuación final */
+.ring-wrap { z-index: 0; }
+.ring-wrap::before {
+  content: "";
+  position: absolute; width: 172px; height: 172px; border-radius: 50%;
+  background: conic-gradient(#ff6b6b, #ffd93d, #6bcb77, #45dcff, #c77dff, #ff6b6b);
+  opacity: 0.15;
+  animation: ring-rotate 9s linear infinite;
+  z-index: -1;
+}
+
+/* Onda de color que emana del tirador mientras arrastras un deslizador */
+@keyframes thumb-ping {
+  0%   { transform: scale(0.6); opacity: 0.85; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+.s-thumb::after {
+  content: "";
+  position: absolute; inset: -6px; border-radius: 50%;
+  border: 2px solid var(--thumb-c, #fff);
+  opacity: 0;
+}
+.s-thumb.dragging::after { animation: thumb-ping 0.65s ease-out infinite; }
+
+/* Detalles al pasar el ratón: swatches del resumen e iconos de la tienda */
+.recap-swatch { transition: transform 0.15s ease; }
+.recap-swatch:hover { transform: scale(1.3) rotate(4deg); }
+.shop-item-icon { transition: transform 0.18s ease; }
+.shop-item:hover .shop-item-icon { transform: rotate(-8deg) scale(1.12); }
+
+/* Los premios dorados también reciben el destello */
+.award-chip { position: relative; overflow: hidden; }
+.award-chip--gold::after, .award-chip--rainbow::after {
+  content: "";
+  position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: linear-gradient(105deg, transparent, rgba(255,255,255,0.14), transparent);
+  transform: translateX(-160%);
+  animation: shine-sweep 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
 
 .custom-scrollbar {
   scrollbar-width: thin;
