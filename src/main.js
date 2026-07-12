@@ -708,8 +708,8 @@ function buildStart() {
         </div>
       </div>
     `;
-    document.body.appendChild(el);
-    
+    app.appendChild(el);
+
     document.getElementById('btn-challenge').addEventListener('click', () => {
       diffIdx = challengeDiffIdx;
       gsap.to(el, { y: -28, opacity: 0, scale: 0.97, duration: 0.3, ease: 'power2.in',
@@ -1285,6 +1285,49 @@ function setupDrag() {
       updatePicker();
     }
   });
+
+  // Control por teclado de los deslizadores (accesibilidad + jugar sin ratón).
+  // Flechas: ±1 · Re/Av Pág: ±10 · Inicio/Fin: extremos · Enter: confirmar.
+  const KEY_SLIDERS = {
+    'hue-col':   { key: 'h', min: 0, max: 359, wrap: true,  freq: () => 400 + (P.h / 360) * 400 },
+    'sat-strip': { key: 's', min: 0, max: 100, wrap: false, freq: () => 300 + (P.s / 100) * 300 },
+    'bri-strip': { key: 'v', min: 0, max: 100, wrap: false, freq: () => 300 + (P.v / 100) * 300 },
+  };
+  Object.entries(KEY_SLIDERS).forEach(([id, cfg]) => {
+    const strip = document.getElementById(id);
+    if (!strip) return;
+    strip.addEventListener('keydown', ev => {
+      let delta = null;
+      switch (ev.key) {
+        case 'ArrowUp': case 'ArrowRight': delta = 1; break;
+        case 'ArrowDown': case 'ArrowLeft': delta = -1; break;
+        case 'PageUp':   delta = 10; break;
+        case 'PageDown': delta = -10; break;
+        case 'Home':     delta = 'min'; break;
+        case 'End':      delta = 'max'; break;
+        case 'Enter':
+          ev.preventDefault();
+          document.getElementById('btn-submit')?.click();
+          return;
+        default: return;
+      }
+      ev.preventDefault();
+      const old = P[cfg.key];
+      let next;
+      if (delta === 'min') next = cfg.min;
+      else if (delta === 'max') next = cfg.max;
+      else {
+        next = old + delta;
+        if (cfg.wrap) next = ((next % 360) + 360) % 360;
+        else next = Math.max(cfg.min, Math.min(cfg.max, next));
+      }
+      if (next !== old) {
+        P[cfg.key] = next;
+        playSliderSound(cfg.freq());
+        updatePicker();
+      }
+    }, { signal: sig });
+  });
 }
 
 function submitGuess() {
@@ -1305,7 +1348,7 @@ function submitGuess() {
   if (elapsed < 10 && elapsed > 0 && rawSc >= 4.0) {
     const mult = 1 + (0.15 * (10 - elapsed) / 10);
     finalSc = rawSc === 10 ? 10 : Math.min(9.99, rawSc * mult);
-    const perc = ((mult - 1) * 100).toFixed(0);
+    const perc = Math.round((mult - 1) * 100);
     if (perc > 0) bonusStr = `+${perc}% Bonus Vel.`;
   }
 

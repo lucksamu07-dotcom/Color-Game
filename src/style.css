@@ -40,6 +40,25 @@ button, [role="button"] {
   cursor: pointer;
 }
 
+/* ── Accesibilidad: foco visible solo al navegar con teclado ──── */
+:focus:not(:focus-visible) { outline: none; }
+button:focus-visible,
+[role="button"]:focus-visible,
+.btn-icon:focus-visible,
+.diff-chip-modern:focus-visible {
+  outline: 3px solid #45dcff;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.hue-col:focus-visible,
+.sat-strip:focus-visible,
+.bri-strip:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: -3px;
+  box-shadow: inset 0 0 0 3px rgba(0,0,0,0.55);
+  z-index: 5;
+}
+
 /* ── Card ─────────────────────────────────────── */
 .card {
   background: rgba(17,17,17,0.97); border-radius: var(--card-r);
@@ -67,9 +86,12 @@ button, [role="button"] {
 .start-card::after {
   content: "";
   position: absolute; left: 0; right: 0; top: 0; height: 2px;
-  background: linear-gradient(90deg, #ff416c, #ffd166, #4cd964, #45dcff, #8b5cf6);
+  background: linear-gradient(90deg, #ff416c, #ffd166, #4cd964, #45dcff, #8b5cf6, #ff416c);
+  background-size: 200% 100%;
   opacity: 0.75;
+  animation: accent-flow 6s linear infinite;
 }
+@keyframes accent-flow { to { background-position: -200% 0; } }
 
 .title-row { overflow: hidden; margin-bottom: 18px; }
 .title-letter {
