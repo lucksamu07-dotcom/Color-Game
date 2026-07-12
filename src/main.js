@@ -135,6 +135,9 @@ function playStartJingle(mode) {
     survival: [220, 329.63, 440, 659.25],
     practice: [329.63, 392, 493.88, 659.25],
     challenge: [293.66, 440, 587.33, 880],
+    timed: [440, 554.37, 659.25, 880],
+    zen: [261.63, 329.63, 392, 523.25],
+    inverse: [587.33, 493.88, 392, 587.33],
   };
   const notes = themes[mode] || themes.practice;
   notes.forEach((freq, i) => {
@@ -460,6 +463,7 @@ function getSessionAwards(avg, perfects, bestRound, numRounds) {
   if (avg >= 8.5) awards.push({ tone: 'green', label: 'Ojo fino', value: `${avg.toFixed(2)}` });
   if (G.combo >= 2) awards.push({ tone: 'fire', label: 'Combo vivo', value: `x${G.combo}` });
   if (G.mode === 'survival' && numRounds >= 8) awards.push({ tone: 'blue', label: 'Superviviente', value: `${numRounds} rondas` });
+  if (G.mode === 'timed') awards.push({ tone: 'blue', label: 'Contrarreloj', value: `${numRounds} ${numRounds === 1 ? 'color' : 'colores'} en 60s` });
   if (!awards.length) awards.push({ tone: 'dim', label: 'Siguiente meta', value: '+7.00' });
   return awards;
 }
@@ -705,6 +709,7 @@ function showQuitConfirm() {
 
   document.getElementById('quit-yes').addEventListener('click', () => {
     if (timerIv !== null) { clearInterval(timerIv); timerIv = null; }
+    stopTimedHUD();
     if (dragCtrl) { dragCtrl.abort(); dragCtrl = null; }
     gsap.killTweensOf('*');
     app.innerHTML = '';
@@ -834,6 +839,18 @@ function buildStart() {
         </button>
         ${isDailyLocked ? '<div id="daily-countdown" style="position:absolute; bottom:-20px; font-size:0.6rem; color:#888; white-space:nowrap; font-weight:700;"></div>' : ''}
       </div>
+
+      <button class="action-btn play" id="btn-timed" title="Contrarreloj: ¿cuántos colores aciertas en 60 segundos?">
+        <div class="btn-rainbow-overlay"></div><span style="font-size:1.4rem; position:relative; z-index:1;">⏱️</span>
+      </button>
+
+      <button class="action-btn play" id="btn-zen" title="Modo Zen: sin tiempo, sin presión">
+        <div class="btn-rainbow-overlay"></div><span style="font-size:1.4rem; position:relative; z-index:1;">🧘</span>
+      </button>
+
+      <button class="action-btn play" id="btn-inverse" title="Modo Inverso: te damos el nombre, tú creas el color">
+        <div class="btn-rainbow-overlay"></div><span style="font-size:1.4rem; position:relative; z-index:1;">🔤</span>
+      </button>
     </div>
     <div style="text-align:center; margin-top:14px;">
       <button class="btn-icon" id="btn-settings" style="display:inline-flex; align-items:center; gap:5px; font-size:0.72rem; color:#444; padding:6px 10px; border-radius:8px;" aria-label="Ajustes de rendimiento">
@@ -924,7 +941,7 @@ function buildStart() {
     gsap.to(el, { x: 0, y: 0, rotation: 0, duration: 0.3, ease: 'elastic.out(1, 0.5)' });
   };
 
-  ['btn-daily', 'btn-practice', 'btn-survival'].forEach(id => {
+  ['btn-daily', 'btn-practice', 'btn-survival', 'btn-timed', 'btn-zen', 'btn-inverse'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
     const locked = btn.dataset.locked === 'true';
@@ -1057,12 +1074,21 @@ function buildMemorize(color) {
   const C = 2 * Math.PI * R;
   const secs = G.diffSecs ?? 3;
 
+  const isInverse = G.mode === 'inverse';
+  const isZen = G.mode === 'zen';
+  const roundLabel = (G.mode === 'survival' || G.mode === 'timed') ? `Ronda ${G.round + 1}` : `${G.round + 1} / ${ROUNDS}`;
+
   const el = document.createElement('div');
   el.className = 'card mem-card';
   el.id = 'screen-mem';
-  el.style.backgroundColor = hsvToCss(color.h, color.s, color.v);
+  // En Inverso no se enseña el color: se enseña su NOMBRE
+  el.style.backgroundColor = isInverse ? '#101016' : hsvToCss(color.h, color.s, color.v);
   el.innerHTML = `
-    <span class="mem-round">${G.mode === 'survival' ? `Ronda ${G.round + 1}` : `${G.round + 1} / ${ROUNDS}`}</span>
+    <span class="mem-round">${roundLabel}</span>
+    ${isInverse ? `<div class="inverse-name">${getColorName(color.h, color.s, color.v)}</div><div class="inverse-sub">Recrea este color de memoria</div>` : ''}
+    ${isZen ? `
+    <button id="zen-ready" class="btn-zen-ready">¡Lo tengo!</button>
+    ` : `
     <div class="timer-wrap" id="timer-wrap">
       <svg class="timer-svg" width="190" height="190" viewBox="0 0 190 190">
         <circle class="t-track" cx="95" cy="95" r="${R}"/>
@@ -1070,11 +1096,11 @@ function buildMemorize(color) {
           stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="0"/>
       </svg>
       <div class="timer-inner">
-        <div class="timer-num" id="timer-num">${secs}</div>
-        <div class="timer-label">seg. para recordar</div>
+        <div class="timer-num" id="timer-num">${Math.ceil(secs)}</div>
+        <div class="timer-label">${isInverse ? 'seg. para leerlo' : 'seg. para recordar'}</div>
       </div>
-    </div>
-    <div class="mem-color-name">${getColorName(color.h, color.s, color.v)}</div>
+    </div>`}
+    ${isInverse ? '' : `<div class="mem-color-name">${getColorName(color.h, color.s, color.v)}</div>`}
     <span class="mem-brand">Color Game</span>
   `;
   app.appendChild(el);
@@ -1086,16 +1112,18 @@ function buildMemorize(color) {
     { clipPath: 'circle(150% at 50% 50%)', opacity: 1, duration: 0.6, ease: 'power2.out',
       onComplete: () => { el.style.clipPath = ''; } }
   );
-  gsap.fromTo('#timer-wrap',
-    { scale: 0.6, opacity: 0 },
-    { scale: 1, opacity: 1, delay: 0.25, duration: 0.5, ease: 'back.out(1.7)' }
-  );
+  if (!isZen) {
+    gsap.fromTo('#timer-wrap',
+      { scale: 0.6, opacity: 0 },
+      { scale: 1, opacity: 1, delay: 0.25, duration: 0.5, ease: 'back.out(1.7)' }
+    );
+  }
 
   // Halo pulsante sin animar box-shadow (animarlo repinta toda la tarjeta en
   // cada frame): la sombra vive en una capa hermana fija bajo la tarjeta y
   // solo se anima su opacidad, que la GPU compone gratis.
   let glowEl = null;
-  if (!lowPowerMode) {
+  if (!lowPowerMode && !isInverse) {
     glowEl = document.createElement('div');
     glowEl.className = 'mem-glow';
     // hsl() con alfa válido (pegar "66" hex a un hsl() es CSS inválido fuera de GSAP)
@@ -1105,6 +1133,26 @@ function buildMemorize(color) {
   }
   const glowTween = glowEl ? gsap.fromTo(glowEl, { opacity: 0.25 },
     { opacity: 1, repeat: -1, yoyo: true, duration: 1.2, ease: 'sine.inOut' }) : null;
+
+  // Zen: sin temporizador — el color se queda hasta que el jugador esté listo
+  if (isZen) {
+    const zenBtn = document.getElementById('zen-ready');
+    gsap.fromTo(zenBtn, { scale: 0.7, opacity: 0 }, { scale: 1, opacity: 1, delay: 0.3, duration: 0.5, ease: 'back.out(1.8)' });
+    zenBtn.addEventListener('click', () => {
+      playClick();
+      if (glowTween) glowTween.kill();
+      if (glowEl) {
+        gsap.killTweensOf(glowEl);
+        gsap.to(glowEl, { opacity: 0, duration: 0.3, onComplete: () => glowEl.remove() });
+      }
+      gsap.killTweensOf(el);
+      gsap.to(el, {
+        rotationY: -90, opacity: 0, duration: 0.4, ease: 'power2.in',
+        onComplete: () => { el.remove(); buildGuess(); }
+      });
+    }, { once: true });
+    return;
+  }
 
   gsap.to('#t-fill', { strokeDashoffset: C, duration: secs, ease: 'none' });
 
@@ -1151,8 +1199,9 @@ function buildGuess() {
   const el = document.createElement('div');
   el.className = 'card guess-card';
   el.id = 'screen-guess';
+  const guessTarget = G.colors[G.round];
   el.innerHTML = `
-    <div class="time-bonus-wrap"><div class="time-bonus-fill" id="bonus-fill"></div></div>
+    ${G.mode === 'zen' ? '' : '<div class="time-bonus-wrap"><div class="time-bonus-fill" id="bonus-fill"></div></div>'}
     <div class="hue-col" id="hue-col" role="slider" aria-label="Tono" aria-valuemin="0" aria-valuemax="360" aria-valuenow="180" tabindex="0">
       <div class="s-thumb" id="hue-thumb" style="top:-12px"></div>
       <span class="strip-lbl">H</span>
@@ -1170,9 +1219,10 @@ function buildGuess() {
     <div class="preview-col">
       ${G.mode === 'survival' ? `<div style="position:absolute; top:24px; left:24px; font-size:1.5rem; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">${'❤️'.repeat(G.lives)}${'🖤'.repeat(3 - G.lives)}</div>` : ''}
       <div class="guess-header">
-        <span>${G.mode === 'survival' ? `Ronda ${G.round + 1}` : `${G.round + 1} / ${ROUNDS}`}</span>
+        <span>${(G.mode === 'survival' || G.mode === 'timed') ? `Ronda ${G.round + 1}` : `${G.round + 1} / ${ROUNDS}`}</span>
         <span class="${G.combo >= 2 ? 'on-fire' : ''}">Color Game ${G.combo >= 2 ? '🔥' : ''}</span>
       </div>
+      ${G.mode === 'inverse' ? `<div class="inverse-target">🎯 ${getColorName(guessTarget.h, guessTarget.s, guessTarget.v)}</div>` : ''}
       <div class="preview-box" id="preview-box">
         <div class="preview-shine"></div>
         <div class="preview-cross" id="preview-cross"></div>
@@ -1194,7 +1244,7 @@ function buildGuess() {
 
   gsap.fromTo(el, { rotationY: 90, opacity: 0 }, { rotationY: 0, opacity: 1, duration: 0.5, ease: 'back.out(1.5)' });
   gsap.fromTo('#btn-submit', { scale: 0 }, { scale: 1, delay: 0.25, duration: 0.5, ease: 'back.out(2)' });
-  gsap.to('#bonus-fill', { scaleX: 0, duration: 10, ease: 'none', delay: 0.4 });
+  if (G.mode !== 'zen') gsap.to('#bonus-fill', { scaleX: 0, duration: 10, ease: 'none', delay: 0.4 });
 
   const btnHint = document.getElementById('btn-hint');
   btnHint.addEventListener('click', () => {
@@ -1424,7 +1474,7 @@ function submitGuess() {
   let finalSc = rawSc;
   let bonusStr = '';
   
-  if (elapsed < 10 && elapsed > 0 && rawSc >= 4.0) {
+  if (G.mode !== 'zen' && elapsed < 10 && elapsed > 0 && rawSc >= 4.0) {
     const mult = 1 + (0.15 * (10 - elapsed) / 10);
     finalSc = rawSc === 10 ? 10 : Math.min(9.99, rawSc * mult);
     const perc = Math.round((mult - 1) * 100);
@@ -1614,6 +1664,22 @@ function buildResult(target, guess, sc, bonusStr = '') {
     const nr = btnNext.getBoundingClientRect();
     spawnBurst(nr.left + nr.width / 2, nr.top + nr.height / 2, { count: 10, colors: [`hsl(${Math.round(sc * 12)},75%,62%)`, '#ffffff'] });
 
+    if (G.mode === 'timed') {
+      gsap.to(el, {
+        rotationY: -90, opacity: 0, duration: 0.35, ease: 'power2.in',
+        onComplete: () => {
+          el.remove();
+          if (G.timeUp) buildFinal();
+          else {
+            G.round++;
+            G.colors.push({ h: randInt(0, 359), s: randInt(40, 100), v: randInt(22, 82) });
+            buildMemorize(G.colors[G.round]);
+          }
+        }
+      });
+      return;
+    }
+
     if (G.mode === 'survival') {
       if (sc < 7.5) {
         G.lives--;
@@ -1649,7 +1715,12 @@ function buildResult(target, guess, sc, bonusStr = '') {
 
 function buildFinal() {
   hideHomeBtn();
-  const numRounds = G.mode === 'survival' ? G.round + 1 : ROUNDS;
+  stopTimedHUD();
+  // En Contrarreloj pueden quedar colores generados sin llegar a jugarse
+  if (G.mode === 'timed') G.colors = G.colors.slice(0, G.scores.length);
+  const numRounds = G.mode === 'survival' ? G.round + 1
+                  : G.mode === 'timed' ? Math.max(1, G.scores.length)
+                  : ROUNDS;
   const avg = G.scores.reduce((a, b) => a + b, 0) / numRounds;
   
   const baseInk = Math.floor(avg * numRounds + (G.combo * 5));
@@ -1759,7 +1830,7 @@ function buildFinal() {
   }).join('');
 
   el.innerHTML = `
-    <div class="final-eyebrow">${G.isDaily ? 'Desafío Diario' : (G.mode === 'survival' ? 'Muerte Súbita' : 'Puntuación Final')}</div>
+    <div class="final-eyebrow">${{ daily: 'Desafío Diario', survival: 'Muerte Súbita', timed: 'Contrarreloj', zen: 'Modo Zen', inverse: 'Modo Inverso' }[G.mode] || 'Puntuación Final'}</div>
     <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
       <div class="ink-badge" title="Gotas de Tinta Ganadas${hasInkMult ? ' (Multiplicador x1.5 activo)' : ''}">
         <span class="ink-drop">💧</span> +${earnedInk}${hasInkMult ? ' <span style="color:#ffcc00;font-size:0.7rem;font-weight:900;">x1.5</span>' : ''}
@@ -1861,6 +1932,9 @@ function shareResult() {
   let title = 'Color Game';
   if (G.mode === 'daily') title += ` Diario - ${dateStr}`;
   else if (G.mode === 'challenge') title += ` - Reto Aceptado`;
+  else if (G.mode === 'timed') title += ` - Contrarreloj`;
+  else if (G.mode === 'zen') title += ` - Zen`;
+  else if (G.mode === 'inverse') title += ` - Inverso`;
   else title += ` - Práctica`;
 
   const diffName = DIFFS[diffIdx].label;
@@ -2575,13 +2649,63 @@ function startGame(mode) {
   else if (mode === 'challenge') setSeed(challengeSeed);
   else clearSeed();
 
-  const numRounds = mode === 'survival' ? 1 : ROUNDS;
+  if (mode === 'timed') {
+    G.diffSecs = 1.5;                    // memorización relámpago: es contrarreloj
+    G.timedEndsAt = Date.now() + 60000;  // 60 segundos globales
+    startTimedHUD();
+  }
+
+  // Supervivencia y Contrarreloj generan colores sobre la marcha
+  const numRounds = (mode === 'survival' || mode === 'timed') ? 1 : ROUNDS;
   for (let i = 0; i < numRounds; i++) {
     G.colors.push({ h: randInt(0, 359), s: randInt(40, 100), v: randInt(22, 82) });
   }
 
   pActiveColor = null;
   buildMemorize(G.colors[0]);
+}
+
+// ── HUD del CONTRARRELOJ ─────────────────────────────────────────────────────
+
+let timedIv = null;
+
+function startTimedHUD() {
+  stopTimedHUD();
+  const hud = document.createElement('div');
+  hud.className = 'timed-hud';
+  hud.id = 'timed-hud';
+  document.body.appendChild(hud);
+  gsap.fromTo(hud, { y: -40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: 'back.out(2)' });
+  const tick = () => {
+    const left = Math.max(0, (G.timedEndsAt || 0) - Date.now());
+    const s = Math.ceil(left / 1000);
+    hud.textContent = `⏱️ ${s}s`;
+    hud.classList.toggle('urgent', s <= 10);
+    if (left <= 0 && !G.timeUp) {
+      G.timeUp = true;
+      playBeepHigh();
+      stopTimedHUD();
+      // Cerrar la partida según la pantalla en la que estemos
+      if (document.getElementById('screen-guess')) {
+        document.getElementById('btn-submit')?.click(); // envía la selección actual
+      } else if (document.getElementById('screen-mem')) {
+        if (timerIv !== null) { clearInterval(timerIv); timerIv = null; }
+        gsap.killTweensOf('#screen-mem');
+        document.getElementById('screen-mem')?.remove();
+        document.querySelector('.mem-glow')?.remove();
+        buildFinal();
+      }
+      // Si está en la pantalla de resultado, el botón siguiente llevará al final
+    }
+  };
+  tick();
+  timedIv = setInterval(tick, 250);
+}
+
+function stopTimedHUD() {
+  if (timedIv) { clearInterval(timedIv); timedIv = null; }
+  const hud = document.getElementById('timed-hud');
+  if (hud) gsap.to(hud, { y: -40, opacity: 0, duration: 0.3, onComplete: () => hud.remove() });
 }
 
 // ── PARTICLES SYSTEM ────────────────────────────────────────────────────────
