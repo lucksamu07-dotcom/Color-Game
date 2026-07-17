@@ -336,25 +336,35 @@ function fireworksShow(count = 6, spread = 1600) {
 }
 
 // "Portal" de color: anillos que se expanden girando desde el centro. Capa
-// propia autónoma, igual que colorWipe/screenFlash — no toca la transición
-// de salida de la pantalla de inicio, solo se dibuja encima.
+// propia autónoma, igual que colorWipe/screenFlash — nunca debe poder
+// bloquear el arranque de la partida, así que va con try/catch y una red de
+// seguridad que fuerza su limpieza pase lo que pase. (Antes usaba un único
+// gsap.timeline() cuyo onComplete, si algo lo interrumpía, dejaba el overlay
+// atascado en pantalla y con él el juego, ya que se dibuja por encima de todo.)
 function portalTransition(color) {
-  if (prefersReducedMotion) return null;
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed; inset:0; z-index:7500; pointer-events:none; display:flex; align-items:center; justify-content:center; overflow:hidden;';
-  const rings = [0, 1, 2].map(() => {
-    const r = document.createElement('div');
-    r.style.cssText = `position:absolute; width:40px; height:40px; border-radius:50%; border:4px solid ${color}; opacity:0.9;`;
-    wrap.appendChild(r);
-    return r;
-  });
-  document.body.appendChild(wrap);
-  const tl = gsap.timeline({ onComplete: () => wrap.remove() });
-  rings.forEach((r, i) => {
-    tl.fromTo(r, { scale: 0.3, opacity: 0.9, rotation: 0 },
-      { scale: 60, opacity: 0, rotation: 180, duration: 0.55, ease: 'power2.out' }, i * 0.08);
-  });
-  return tl;
+  if (prefersReducedMotion) return;
+  try {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed; inset:0; z-index:2000; pointer-events:none; display:flex; align-items:center; justify-content:center; overflow:hidden;';
+    document.body.appendChild(wrap);
+
+    let cleaned = false;
+    const cleanup = () => { if (!cleaned) { cleaned = true; wrap.remove(); } };
+    setTimeout(cleanup, 1200); // red de seguridad: desaparece sí o sí
+
+    let remaining = 3;
+    for (let i = 0; i < 3; i++) {
+      const r = document.createElement('div');
+      r.style.cssText = `position:absolute; width:40px; height:40px; border-radius:50%; border:4px solid ${color}; opacity:0.9;`;
+      wrap.appendChild(r);
+      gsap.fromTo(r, { scale: 0.3, opacity: 0.9, rotation: 0 }, {
+        scale: 60, opacity: 0, rotation: 180, duration: 0.55, delay: i * 0.08, ease: 'power2.out',
+        onComplete: () => { remaining--; if (remaining <= 0) cleanup(); },
+      });
+    }
+  } catch (_) {
+    // Un fallo puramente decorativo nunca debe impedir que el juego arranque.
+  }
 }
 
 function epicCelebration(title, subtitle = '') {
