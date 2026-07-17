@@ -1077,8 +1077,15 @@ function buildStart() {
 
     document.getElementById('btn-challenge').addEventListener('click', () => {
       diffIdx = challengeDiffIdx;
-      gsap.to(el, { y: -28, opacity: 0, scale: 0.97, duration: 0.3, ease: 'power2.in',
-        onComplete: () => { el.remove(); buildCountdown(() => startGame('challenge')); } });
+      let started = false;
+      const goToGame = () => {
+        if (started) return;
+        started = true;
+        el.remove();
+        buildCountdown(() => startGame('challenge'));
+      };
+      setTimeout(goToGame, 600); // red de seguridad, igual que en los botones de modo
+      gsap.to(el, { y: -28, opacity: 0, scale: 0.97, duration: 0.3, ease: 'power2.in', onComplete: goToGame });
     });
     document.getElementById('btn-cancel-challenge').addEventListener('click', () => {
       window.location.href = window.location.pathname; // clear url
@@ -1422,9 +1429,14 @@ function buildStart() {
     const TICK = 0.06;
     const RAMP_STEPS = Math.round(RAMP_DURATION / TICK);
     let step = 0;
+    // Multiplicadores bajados a la mitad de lo que eran: con los de antes, en
+    // el pico el botón (64px) se desplazaba hasta 22px, lo suficiente para
+    // escaparse de debajo de un cursor quieto — eso disparaba un mouseleave
+    // "falso" (el ratón no se movió, el botón sí), lo que reseteaba el
+    // temblor a medio hacer y hacía que el clic cayera fuera del botón.
     shakeTween = gsap.to(el, {
-      x: () => (Math.random() - 0.5) * intensity * 2.8,
-      y: () => (Math.random() - 0.5) * intensity * 1.7,
+      x: () => (Math.random() - 0.5) * intensity * 1.3,
+      y: () => (Math.random() - 0.5) * intensity * 0.8,
       rotation: () => (Math.random() - 0.5) * intensity * 0.4,
       duration: TICK,
       repeat: RAMP_STEPS - 1,
@@ -1444,13 +1456,28 @@ function buildStart() {
     resetCardTransform();
   };
 
+  // Para el chequeo de "mouseleave falso" de abajo: dónde está el cursor de
+  // verdad en cada instante.
+  let lastMouseX = -1, lastMouseY = -1;
+  window.addEventListener('mousemove', e => { lastMouseX = e.clientX; lastMouseY = e.clientY; }, { passive: true });
+
   ['btn-daily', 'btn-practice', 'btn-survival', 'btn-timed', 'btn-zen', 'btn-inverse'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
     const locked = btn.dataset.locked === 'true';
     if (!locked) {
       btn.addEventListener('mouseenter', startShake);
-      btn.addEventListener('mouseleave', stopShake);
+      // No se corta al primer mouseleave: el propio temblor puede apartar el
+      // botón de debajo de un cursor que no se ha movido, y eso también
+      // cuenta como "salir" para el navegador. Se comprueba un instante
+      // después, con la posición real del cursor, si de verdad se fue.
+      btn.addEventListener('mouseleave', () => {
+        setTimeout(() => {
+          const under = document.elementFromPoint(lastMouseX, lastMouseY);
+          if (under && (under === btn || btn.contains(under))) return;
+          stopShake();
+        }, 120);
+      });
     }
     btn.addEventListener('click', () => {
       if (locked) {
@@ -1463,22 +1490,44 @@ function buildStart() {
         return;
       }
       const mode = id.replace('btn-', '');
-      playClick();
-      playStartJingle(mode);
-      const br = btn.getBoundingClientRect();
-      spawnBurst(br.left + br.width / 2, br.top + br.height / 2, { count: 14 });
-      const modeColors = { daily: '#ffd166', practice: '#8b5cf6', survival: '#ff4136', timed: '#45dcff', zen: '#4cd964', inverse: '#ff6ec7' };
-      portalTransition(modeColors[mode] || '#ffffff');
-      document.querySelectorAll('.play').forEach(b => b.style.pointerEvents = 'none');
-      stopShake();
-      gsap.to(el, { x: 0, y: 0, rotation: 0, duration: 0.1 });
-      stopTaglines();
-      G.diffSecs = DIFFS[diffIdx].secs;
-      gsap.to(el, {
-        y: -28, opacity: 0, scale: 0.97,
-        duration: 0.3, ease: 'power2.in',
-        onComplete: () => { el.remove(); buildCountdown(() => startGame(mode)); }
-      });
+
+      // Garantía dura: se pase lo que pase con las animaciones de abajo (y
+      // hay unas cuantas), la partida arranca sí o sí, como muy tarde a los
+      // 600ms del clic. goToGame() está protegida para no ejecutarse dos
+      // veces, así que da igual si la dispara el propio tween al terminar
+      // o esta red de seguridad — solo la primera cuenta.
+      let started = false;
+      const goToGame = () => {
+        if (started) return;
+        started = true;
+        el.remove();
+        buildCountdown(() => startGame(mode));
+      };
+      setTimeout(goToGame, 600);
+
+      // Todo lo puramente decorativo va protegido: un fallo aquí no debe
+      // poder impedir nunca que goToGame() se dispare.
+      try {
+        playClick();
+        playStartJingle(mode);
+        const br = btn.getBoundingClientRect();
+        spawnBurst(br.left + br.width / 2, br.top + br.height / 2, { count: 14 });
+        const modeColors = { daily: '#ffd166', practice: '#8b5cf6', survival: '#ff4136', timed: '#45dcff', zen: '#4cd964', inverse: '#ff6ec7' };
+        portalTransition(modeColors[mode] || '#ffffff');
+        document.querySelectorAll('.play').forEach(b => b.style.pointerEvents = 'none');
+        stopShake();
+        gsap.to(el, { x: 0, y: 0, rotation: 0, duration: 0.1 });
+        stopTaglines();
+        G.diffSecs = DIFFS[diffIdx].secs;
+        gsap.to(el, {
+          y: -28, opacity: 0, scale: 0.97,
+          duration: 0.3, ease: 'power2.in',
+          onComplete: goToGame,
+        });
+      } catch (_) {
+        // Si algo decorativo falla, goToGame() ya está programada por el
+        // setTimeout de arriba y arrancará la partida igualmente.
+      }
     }, { once: true });
   });
 
