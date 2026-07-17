@@ -1,0 +1,16 @@
+{
+  "name": "Color Game",
+  "short_name": "Color Game",
+  "description": "¿Qué tan buena es tu memoria para los colores? Juega el desafío diario.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    { "src": "/favicon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/favicon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/favicon.png", "sizes": "670x670", "type": "image/png", "purpose": "maskable" }
+  ]
+}

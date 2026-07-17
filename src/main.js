@@ -13,6 +13,21 @@ function initAudio() {
   }
 }
 
+// Cada skin cambia el "timbre" de (casi) todos los sonidos del juego desde
+// este único punto, sin tocar cada llamada a playTone() por separado.
+function getSkinWaveType(type) {
+  const skin = stats.activeSkin;
+  if (skin === 'skinRetro') return (type === 'sine' || type === 'triangle') ? 'square' : type;
+  if (skin === 'skinCyberpunk') return type === 'sine' ? 'sawtooth' : type;
+  return type;
+}
+function getSkinFreqMult() {
+  const skin = stats.activeSkin;
+  if (skin === 'skinCristal') return 1.18; // más agudo: campanillas
+  if (skin === 'skinRetro') return 0.92;   // un pelín más grave: chiptune
+  return 1;
+}
+
 function playTone(freq, type, duration, vol=0.1) {
   if (isMuted) return;
   if (!audioCtx) initAudio();
@@ -21,8 +36,8 @@ function playTone(freq, type, duration, vol=0.1) {
 
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  osc.type = getSkinWaveType(type);
+  osc.frequency.setValueAtTime(freq * getSkinFreqMult(), audioCtx.currentTime);
   
   gain.gain.setValueAtTime(0, audioCtx.currentTime);
   gain.gain.linearRampToValueAtTime(vol, audioCtx.currentTime + 0.02);
@@ -222,6 +237,150 @@ function spawnBurst(x, y, opts = {}) {
   }
 }
 
+// Sacudida de cámara reutilizable (generaliza el patrón ad-hoc que ya
+// existía para rondas malas/perfectas en buildResult). Anima solo
+// transform, así que es barata y no interfiere con otros tweens del propio
+// elemento (usa su transform actual como base, no lo pisa).
+function screenShake(el, opts = {}) {
+  if (prefersReducedMotion || !el) return;
+  const amp = opts.amp ?? 10;
+  const count = opts.count ?? 8;
+  const obj = { x: 0, y: 0 };
+  gsap.to(obj, {
+    x: amp, y: amp * 0.7, duration: 0.05, repeat: count, yoyo: true,
+    onUpdate: () => { el.style.transform = `translate(${obj.x}px, ${obj.y}px)`; },
+    onComplete: () => { el.style.transform = 'none'; },
+  });
+}
+
+// Destello de pantalla completa (barato: un div de color a opacidad alta
+// que se apaga con un tween de opacity, sin canvas ni filtros caros).
+function screenFlash(color = '#ffffff', opts = {}) {
+  if (prefersReducedMotion) return;
+  const flash = document.createElement('div');
+  flash.style.cssText = `position:fixed; inset:0; background:${color}; opacity:${opts.peak ?? 0.35}; pointer-events:none; z-index:6000;`;
+  document.body.appendChild(flash);
+  gsap.to(flash, { opacity: 0, duration: opts.duration ?? 0.5, ease: 'power2.out', onComplete: () => flash.remove() });
+}
+
+// Barrido de color de pantalla completa entre fases del juego. Es una capa
+// superpuesta autónoma (se crea, se anima y se autodestruye) que no toca ni
+// reemplaza las transiciones GSAP que ya existen en cada pantalla — solo se
+// dibuja encima, así que no hay riesgo de romper una transición existente.
+// El estilo del barrido varía según el skin activo (mismo llamador, mismos
+// puntos de la partida, solo cambia cómo se ve la capa).
+function colorWipe(color, opts = {}) {
+  if (prefersReducedMotion) return null;
+  const skin = stats.activeSkin;
+
+  if (skin === 'skinRetro') {
+    // Escaneo horizontal tipo CRT en vez de círculo.
+    const wipe = document.createElement('div');
+    wipe.style.cssText = `position:fixed; inset:0; background:${color}; z-index:7000; pointer-events:none; clip-path:inset(0 0 100% 0); will-change:clip-path;`;
+    document.body.appendChild(wipe);
+    const tl = gsap.timeline({ onComplete: () => wipe.remove() });
+    tl.to(wipe, { clipPath: 'inset(0 0 0% 0)', duration: opts.inDur ?? 0.3, ease: 'steps(6)' });
+    tl.to(wipe, { clipPath: 'inset(100% 0 0 0)', duration: opts.outDur ?? 0.32, ease: 'steps(6)' }, `+=${opts.hold ?? 0.04}`);
+    return tl;
+  }
+
+  if (skin === 'skinCyberpunk') {
+    // Barrido con separación RGB (3 capas desfasadas en rojo/cian) + jitter.
+    const layer = (dx, c, blend) => {
+      const d = document.createElement('div');
+      d.style.cssText = `position:fixed; inset:0; background:${c}; z-index:7000; pointer-events:none; clip-path:circle(0% at 50% 50%); mix-blend-mode:${blend}; transform:translateX(${dx}px);`;
+      document.body.appendChild(d);
+      return d;
+    };
+    const base = layer(0, color, 'normal');
+    const r = layer(-4, 'rgba(255,0,60,0.55)', 'screen');
+    const c = layer(4, 'rgba(0,229,255,0.55)', 'screen');
+    const all = [base, r, c];
+    const tl = gsap.timeline({ onComplete: () => all.forEach(d => d.remove()) });
+    tl.to(all, { clipPath: 'circle(150% at 50% 50%)', duration: opts.inDur ?? 0.24, ease: 'power1.in' });
+    tl.to([r, c], { x: 0, duration: 0.18, ease: 'steps(4)' }, '<');
+    tl.to(all, { clipPath: 'circle(0% at 50% 50%)', duration: opts.outDur ?? 0.4, ease: 'power2.out' }, `+=${opts.hold ?? 0.05}`);
+    return tl;
+  }
+
+  // Cristal (y skin por defecto): el mismo círculo de siempre; en Cristal se
+  // aligera a un barrido translúcido con desenfoque para que se note el vidrio.
+  const wipe = document.createElement('div');
+  wipe.style.cssText = skin === 'skinCristal'
+    ? `position:fixed; inset:0; background:${color}; opacity:0.55; backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); z-index:7000; pointer-events:none; clip-path:circle(0% at 50% 50%); will-change:clip-path;`
+    : `position:fixed; inset:0; background:${color}; z-index:7000; pointer-events:none; clip-path:circle(0% at 50% 50%); will-change:clip-path;`;
+  document.body.appendChild(wipe);
+  const tl = gsap.timeline({ onComplete: () => wipe.remove() });
+  tl.to(wipe, { clipPath: 'circle(150% at 50% 50%)', duration: opts.inDur ?? 0.32, ease: 'power2.in' });
+  tl.to(wipe, { clipPath: 'circle(0% at 50% 50%)', duration: opts.outDur ?? 0.42, ease: 'power2.out' }, `+=${opts.hold ?? 0.05}`);
+  return tl;
+}
+
+// Celebración a pantalla completa reservada para los hitos más raros del
+// juego (hoy: completar el Pase de Temporada entero). Overlay propio y
+// autónomo — no compite con nada de lo que ya haya en pantalla.
+// Varias explosiones de spawnBurst repartidas por la pantalla y escalonadas
+// en el tiempo: mismo "motor" barato de siempre, pero varias veces seguidas
+// da la sensación de fuegos artificiales de verdad en vez de un solo pop.
+function fireworksShow(count = 6, spread = 1600) {
+  if (prefersReducedMotion) return;
+  const palette = ['#ffd700', '#ff416c', '#45dcff', '#4cd964', '#c77dff', '#ff9f45'];
+  for (let i = 0; i < count; i++) {
+    setTimeout(() => {
+      const x = window.innerWidth * (0.18 + Math.random() * 0.64);
+      const y = window.innerHeight * (0.16 + Math.random() * 0.4);
+      const c = palette[Math.floor(Math.random() * palette.length)];
+      spawnBurst(x, y, { count: 16, colors: [c, '#ffffff'] });
+    }, (i / count) * spread + Math.random() * 120);
+  }
+}
+
+// "Portal" de color: anillos que se expanden girando desde el centro. Capa
+// propia autónoma, igual que colorWipe/screenFlash — no toca la transición
+// de salida de la pantalla de inicio, solo se dibuja encima.
+function portalTransition(color) {
+  if (prefersReducedMotion) return null;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed; inset:0; z-index:7500; pointer-events:none; display:flex; align-items:center; justify-content:center; overflow:hidden;';
+  const rings = [0, 1, 2].map(() => {
+    const r = document.createElement('div');
+    r.style.cssText = `position:absolute; width:40px; height:40px; border-radius:50%; border:4px solid ${color}; opacity:0.9;`;
+    wrap.appendChild(r);
+    return r;
+  });
+  document.body.appendChild(wrap);
+  const tl = gsap.timeline({ onComplete: () => wrap.remove() });
+  rings.forEach((r, i) => {
+    tl.fromTo(r, { scale: 0.3, opacity: 0.9, rotation: 0 },
+      { scale: 60, opacity: 0, rotation: 180, duration: 0.55, ease: 'power2.out' }, i * 0.08);
+  });
+  return tl;
+}
+
+function epicCelebration(title, subtitle = '') {
+  if (prefersReducedMotion) return;
+  const ov = document.createElement('div');
+  ov.className = 'epic-celebration';
+  ov.innerHTML = `
+    <div class="epic-rays"></div>
+    <div class="epic-text">
+      <div class="epic-title">${title}</div>
+      ${subtitle ? `<div class="epic-sub">${subtitle}</div>` : ''}
+    </div>
+  `;
+  document.body.appendChild(ov);
+  vibrate([80, 40, 80, 40, 160]);
+  gsap.fromTo(ov, { opacity: 0 }, { opacity: 1, duration: 0.3 });
+  gsap.fromTo(ov.querySelector('.epic-title'), { scale: 0.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.6, delay: 0.15, ease: 'elastic.out(1, 0.55)' });
+  if (subtitle) gsap.fromTo(ov.querySelector('.epic-sub'), { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, delay: 0.5 });
+  spawnBurst(window.innerWidth / 2, window.innerHeight / 2, { count: 26, colors: ['#ffd700', '#ff9f45', '#4cd964', '#45dcff', '#ffffff'] });
+  fireworksShow(7, 2600);
+
+  const dismiss = () => { gsap.to(ov, { opacity: 0, duration: 0.4, onComplete: () => ov.remove() }); };
+  ov.addEventListener('click', dismiss, { once: true });
+  setTimeout(dismiss, 3400);
+}
+
 const muteBtn = document.createElement('button');
 muteBtn.className = 'btn-mute';
 muteBtn.innerHTML = isMuted ? '🔇' : '🔊';
@@ -244,6 +403,11 @@ let stats = JSON.parse(localStorage.getItem('colorGameStats')) || {
   history: [],
   ink: 0
 };
+// Solo en "npm run dev" local (ver saveStats()): se aplica también aquí, al
+// cargar, porque la pantalla principal lee stats.ink antes de que se llame
+// a saveStats() por primera vez — si no, se veía el valor viejo hasta la
+// primera acción que guardase.
+if (import.meta.env.DEV) stats.ink = Math.max(stats.ink || 0, 999999);
 if (!stats.history) stats.history = [];
 if (stats.ink === undefined) stats.ink = 0;
 if (stats.xp === undefined) stats.xp = 0;
@@ -259,12 +423,95 @@ if (stats.activeTheme === undefined) stats.activeTheme = null;
 if (!stats.unlockedTitles) stats.unlockedTitles = [];
 if (stats.activeTitle === undefined) stats.activeTitle = null;
 if (stats.premiumConfetti === undefined) stats.premiumConfetti = false;
+if (stats.permHintBoost === undefined) stats.permHintBoost = false;
+if (stats.permTimeBoost === undefined) stats.permTimeBoost = false;
+if (stats.permRetryBoost === undefined) stats.permRetryBoost = false;
+if (stats.permInkBoost === undefined) stats.permInkBoost = false;
+if (stats.permXpBoost === undefined) stats.permXpBoost = false;
 if (!stats.unlockedAch) stats.unlockedAch = {};   // logros: id → fecha de desbloqueo
 if (!stats.c) stats.c = {};                       // contadores acumulados para logros
+if (stats.seasonId === undefined) stats.seasonId = null;
+if (stats.seasonPoints === undefined) stats.seasonPoints = 0;
+if (!stats.seasonClaimedTiers) stats.seasonClaimedTiers = [];
+if (stats.dailyReminderEnabled === undefined) stats.dailyReminderEnabled = false;
+if (stats.playerName === undefined) stats.playerName = '';
+if (!stats.unlockedSkins) stats.unlockedSkins = [];
+if (stats.activeSkin === undefined) stats.activeSkin = null;
+if (!stats.unlockedFrames) stats.unlockedFrames = [];
+if (stats.activeFrame === undefined) stats.activeFrame = null;
+if (!stats.unlockedCursors) stats.unlockedCursors = [];
+if (stats.activeCursor === undefined) stats.activeCursor = null;
+if (!stats.unlockedShareFrames) stats.unlockedShareFrames = [];
+if (stats.activeShareFrame === undefined) stats.activeShareFrame = null;
+if (stats.cursorTrailEnabled === undefined) stats.cursorTrailEnabled = false;
 
 function getXPNeeded(lvl) { return Math.floor(100 * Math.pow(lvl, 1.5)); }
 
+// ── TEMPORADAS / PASE DE BATALLA ────────────────────────────────────────────
+// La temporada se calcula a partir de una fecha fija: todos los jugadores
+// entran y salen de la misma temporada a la vez sin necesitar servidor.
+const SEASON_LENGTH_DAYS = 30;
+const SEASON_EPOCH = new Date(2025, 0, 1).getTime();
+function getSeasonInfo() {
+  const daysSince = Math.max(0, Math.floor((Date.now() - SEASON_EPOCH) / 86400000));
+  const seasonNum = Math.floor(daysSince / SEASON_LENGTH_DAYS) + 1;
+  const dayInSeason = daysSince % SEASON_LENGTH_DAYS;
+  return { seasonNum, seasonId: `S${seasonNum}`, daysLeft: SEASON_LENGTH_DAYS - dayInSeason };
+}
+
+// El tema exclusivo de cada temporada se genera a partir de su número: cada
+// temporada tiene un tono distinto sin necesitar arte nuevo por temporada.
+function getSeasonThemeId(seasonNum) { return `seasonTheme_${(seasonNum * 47) % 360}`; }
+
+function getSeasonTiers(seasonNum) {
+  return [
+    { threshold: 60,   ink: 60 },
+    { threshold: 150,  ink: 90 },
+    { threshold: 280,  ink: 130 },
+    { threshold: 450,  ink: 170 },
+    { threshold: 670,  ink: 220 },
+    { threshold: 950,  ink: 280 },
+    { threshold: 1300, ink: 350 },
+    { threshold: 1730, ink: 430 },
+    { threshold: 2250, ink: 520 },
+    { threshold: 2900, ink: 300, theme: getSeasonThemeId(seasonNum) },
+  ];
+}
+
+// Se llama al terminar cada partida: reinicia el progreso si cambió la
+// temporada y devuelve los tramos recién desbloqueados (para el aviso).
+function checkSeasonTiers(earnedSeasonPts) {
+  const { seasonNum, seasonId } = getSeasonInfo();
+  if (stats.seasonId !== seasonId) {
+    stats.seasonId = seasonId;
+    stats.seasonPoints = 0;
+    stats.seasonClaimedTiers = [];
+  }
+  stats.seasonPoints = (stats.seasonPoints || 0) + earnedSeasonPts;
+
+  const tiers = getSeasonTiers(seasonNum);
+  const claimed = stats.seasonClaimedTiers || (stats.seasonClaimedTiers = []);
+  const newlyClaimed = [];
+  tiers.forEach((tier, i) => {
+    if (claimed.includes(i) || stats.seasonPoints < tier.threshold) return;
+    claimed.push(i);
+    stats.ink = (stats.ink || 0) + tier.ink;
+    if (tier.theme) {
+      stats.unlockedThemes = [...(stats.unlockedThemes || []), tier.theme];
+      stats.activeTheme = tier.theme; // recompensa final: se equipa al instante, como al comprar en la tienda
+      updateAuroraColors();
+      epicCelebration('🎉 ¡PASE DE TEMPORADA COMPLETADO!', `Temporada S${seasonNum} · Tema exclusivo desbloqueado y equipado`);
+    }
+    newlyClaimed.push({ tier: i, ...tier });
+  });
+  return newlyClaimed;
+}
+
 function saveStats() {
+  // Solo en "npm run dev" local: Vite inyecta import.meta.env.DEV=false en
+  // cualquier build de producción (lo que corre en Vercel), así que esto
+  // nunca existe en la web pública ni es activable por otros jugadores.
+  if (import.meta.env.DEV) stats.ink = Math.max(stats.ink || 0, 999999);
   localStorage.setItem('colorGameStats', JSON.stringify(stats));
 }
 
@@ -317,7 +564,9 @@ let perfSettings = (() => {
 function savePerf() { localStorage.setItem('colorGamePerf', JSON.stringify(perfSettings)); }
 function applyPerf() {
   document.body.classList.toggle('perf-no-blur', !perfSettings.blur);
+  document.body.classList.toggle('perf-no-aurora', !perfSettings.ambilight);
   initParticles();
+  ensureParticleLoop();
   // Ocultar/mostrar ambilight existente según ajuste
   const ambi = document.getElementById('ambilight');
   if (ambi && !perfSettings.ambilight) ambi.style.background = 'transparent';
@@ -407,6 +656,20 @@ const RANKS = [
   [0.0, '⬜ Daltónico Accidental'],
 ];
 function getRank(s) { return (RANKS.find(([m]) => s >= m) ?? RANKS.at(-1))[1]; }
+
+// Multiplicador de Tinta/XP por racha de rondas >=9.0 mantenida hasta el
+// final de la partida. G.combo se resetea en submitGuess() ante cualquier
+// ronda floja, así que llegar con racha viva a buildFinal() ya implica
+// haber terminado la partida sin fallar: por eso "doble"/"triple" solo
+// premian si aciertas MUCHO y aguantas hasta el último color.
+const STREAK_MULTS = [
+  [5, 3,    '🌈 RACHA PERFECTA'],
+  [4, 2,    '🔥🔥 RACHA x2'],
+  [3, 1.5,  '🔥 RACHA x1.5'],
+  [2, 1.15, 'Racha x1.15'],
+  [0, 1,    ''],
+];
+function getStreakMult(combo) { return (STREAK_MULTS.find(([m]) => combo >= m) ?? STREAK_MULTS.at(-1)); }
 
 function hueDelta(a, b) {
   return Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
@@ -505,6 +768,11 @@ const _rawSeed = urlParams.get('reto') || '';
 let challengeSeed = _rawSeed.replace(/[^a-zA-Z0-9_\-.]/g, '').slice(0, 64);
 let challengeMode = challengeSeed.length > 0;
 let challengeDiffIdx = Math.max(0, Math.min(DIFFS.length - 1, parseInt(urlParams.get('diff')) || 0));
+// Puntuación del retador incrustada en el enlace: convierte "jugar los mismos
+// colores" en un duelo de verdad (ganas/pierdes contra un número concreto),
+// en vez de solo compartir texto suelto que la app no podía verificar.
+const _rawTargetScore = parseFloat(urlParams.get('score'));
+let challengeTargetScore = Number.isFinite(_rawTargetScore) ? Math.max(0, Math.min(10, _rawTargetScore)) : null;
 
 const app = document.getElementById('app');
 
@@ -609,6 +877,24 @@ function buildSettings() {
         <button class="toggle-pill${perfSettings.blur?' on':''}" data-key="blur" aria-label="Cristal"></button>
       </div>
 
+      <div class="shop-section-title" style="margin-top:8px;">🔔 Notificaciones</div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Recordatorio de racha diaria</div>
+          <div class="setting-desc">Aviso si no has jugado el Desafío Diario. Solo funciona en Chrome/Android con la app instalada; en otros navegadores no llegará con la app cerrada.</div>
+        </div>
+        <button id="btn-reminder-toggle" class="toggle-pill${stats.dailyReminderEnabled ? ' on' : ''}" aria-label="Recordatorio diario"></button>
+      </div>
+
+      <div class="shop-section-title" style="margin-top:8px;">✨ Extras</div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Estela de cursor</div>
+          <div class="setting-desc">Partículas siguiendo tu ratón por toda la app. Solo escritorio.</div>
+        </div>
+        <button id="btn-trail-toggle" class="toggle-pill${stats.cursorTrailEnabled ? ' on' : ''}" aria-label="Estela de cursor"></button>
+      </div>
+
       <button id="btn-settings-reset" style="padding:12px; border-radius:12px; border:1px solid #2a2a2a; background:#111; color:#555; font-size:0.78rem; font-weight:700; cursor:pointer; transition:all 0.15s; touch-action:manipulation; width:100%;">
         Restaurar valores por defecto del dispositivo
       </button>
@@ -638,13 +924,42 @@ function buildSettings() {
       });
     });
 
-    el.querySelectorAll('.toggle-pill').forEach(pill => {
+    el.querySelectorAll('.toggle-pill[data-key]').forEach(pill => {
       pill.addEventListener('click', () => {
         playClick();
         perfSettings[pill.dataset.key] = !perfSettings[pill.dataset.key];
         savePerf(); applyPerf();
         renderUI();
       });
+    });
+
+    document.getElementById('btn-reminder-toggle').addEventListener('click', async () => {
+      playClick();
+      if (stats.dailyReminderEnabled) {
+        disableDailyReminder();
+        renderUI();
+        return;
+      }
+      const ok = await enableDailyReminder();
+      if (!ok) {
+        const btn = document.getElementById('btn-reminder-toggle');
+        if (btn) {
+          const desc = btn.closest('.setting-row').querySelector('.setting-desc');
+          const orig = desc.textContent;
+          desc.textContent = 'Permiso de notificaciones denegado por el navegador.';
+          desc.style.color = '#ff6b6b';
+          setTimeout(() => { desc.textContent = orig; desc.style.color = ''; }, 3000);
+        }
+        return;
+      }
+      renderUI();
+    });
+
+    document.getElementById('btn-trail-toggle').addEventListener('click', () => {
+      playClick();
+      stats.cursorTrailEnabled = !stats.cursorTrailEnabled;
+      saveStats();
+      renderUI();
     });
 
     document.getElementById('btn-settings-reset').addEventListener('click', () => {
@@ -729,12 +1044,16 @@ function buildStart() {
   el.className = 'card start-card';
 
   if (challengeMode) {
+    const targetHtml = challengeTargetScore !== null
+      ? `<div class="duel-target-score">Puntuación a superar<br><strong>${challengeTargetScore.toFixed(2)}</strong> / 10</div>`
+      : '';
     el.innerHTML = `
       <div class="title-row"><span class="title-letter">R</span><span class="title-letter">e</span><span class="title-letter">t</span><span class="title-letter">o</span></div>
       <div class="rank-badge" style="background: rgba(255,50,50,0.15); border-color: rgba(255,50,50,0.4); color: #ff8888;">⚔️ Has sido retado</div>
       <div class="stats-row" style="display:block; text-align:center; padding: 12px; color:#aaa; font-size:0.85rem;">
         Alguien te ha desafiado a superar su puntuación con sus mismos colores exactos.<br><br>Dificultad: <b style="color:#fff">${DIFFS[challengeDiffIdx].label}</b>
       </div>
+      ${targetHtml}
       <div class="actions-col">
         <div class="action-btn play" id="btn-challenge" style="background: linear-gradient(145deg, #007aff, #005bb5); border-color: #007aff;">
           <div class="btn-title" style="color:#fff">Aceptar Reto</div>
@@ -781,8 +1100,9 @@ function buildStart() {
   const isDailyLocked = (stats.gamesPlayed >= 5) && (playedToday !== undefined);
 
   el.innerHTML = `
-    <div class="ink-badge" style="position:absolute; top:24px; left:24px;" title="Gotas de Tinta">
+    <div class="ink-badge" style="position:absolute; top:24px; left:24px;" title="Gotas de Tinta" ${stats.activeFrame ? `data-frame="${stats.activeFrame}"` : ''}>
       <span class="ink-drop">💧</span> ${Math.floor(stats.ink || 0)}
+      ${import.meta.env.DEV ? '<span style="margin-left:5px; color:#4cd964; font-size:0.6rem; font-weight:900;">DEV</span>' : ''}
     </div>
     <div style="position:absolute; top:24px; right:24px; text-align:right;">
       <div style="font-size:0.7rem; color:#888; font-weight:900; margin-bottom:4px;">NIVEL ${stats.level}</div>
@@ -793,13 +1113,15 @@ function buildStart() {
     <button id="btn-history" class="btn-icon" style="position:absolute; top:56px; right:24px;" title="Muro de Historial" aria-label="Historial de partidas">${wallSVG}</button>
     <button id="btn-ach" class="btn-icon" style="position:absolute; top:92px; right:24px;" title="Logros" aria-label="Logros">${trophySVG}</button>
     <button id="btn-shop" class="btn-icon${activePowerUps > 0 ? ' btn-icon--badge' : ''}" style="position:absolute; top:56px; left:24px;" title="Tienda de Tinta" aria-label="Abrir tienda">${shopSVG}${activePowerUps > 0 ? `<span class="shop-badge">${activePowerUps}</span>` : ''}</button>
+    <button id="btn-season" class="btn-icon" style="position:absolute; top:92px; left:24px; font-size:1.15rem;" title="Pase de Temporada" aria-label="Pase de Temporada">🎟️</button>
+    <button id="btn-leaderboard" class="btn-icon" style="position:absolute; top:128px; left:24px; font-size:1.15rem;" title="Clasificación de Hoy" aria-label="Clasificación de Hoy">🏅</button>
     <div class="title-row">${letters}</div>
     <div class="daily-palette" aria-hidden="true">${dailyPaletteHtml}</div>
     <div class="rank-badge${stats.activeTitle === 'chromatico' ? ' rank-badge--rainbow' : ''}" title="Basado en tu Mejor Puntuación">${userRank}</div>
     <div class="stats-row">
       <div class="stat"><div class="stat-val">${stats.bestScore.toFixed(2)}</div><div class="stat-lbl">Mejor</div></div>
       <div class="stat"><div class="stat-val">${stats.gamesPlayed}</div><div class="stat-lbl">Partidas</div></div>
-      <button class="stat stat-btn" id="btn-calendar" title="Ver calendario del Desafío Diario" aria-label="Calendario del Desafío Diario"><div class="stat-val">${stats.streak}</div><div class="stat-lbl">Racha 🔥</div></button>
+      <button class="stat stat-btn${stats.streak >= 30 ? ' streak-tier-3' : stats.streak >= 7 ? ' streak-tier-2' : stats.streak >= 3 ? ' streak-tier-1' : ''}" id="btn-calendar" title="Ver calendario del Desafío Diario" aria-label="Calendario del Desafío Diario"><div class="stat-val">${stats.streak}</div><div class="stat-lbl">Racha 🔥</div></button>
     </div>
     <div class="focus-card${focus.done ? ' done' : ''}">
       <div class="focus-kicker">${focus.done ? 'Completado hoy' : 'Objetivo de hoy'}</div>
@@ -860,6 +1182,16 @@ function buildStart() {
   `;
   app.appendChild(el);
 
+  // El logo cae con rebote antes de que arranque su animación ambiental de
+  // flotar/arcoíris (que ya tenía un delay de 1.2s+ integrado en el CSS):
+  // termina de rebotar y justo entonces el CSS toma el relevo sin pisarse.
+  if (!prefersReducedMotion) {
+    gsap.from('.title-letter', {
+      y: -70, opacity: 0, rotation: () => gsap.utils.random(-20, 20),
+      duration: 0.55, stagger: 0.07, ease: 'bounce.out',
+    });
+  }
+
   const stopTaglines = startTaglines();
 
   document.getElementById('btn-history').addEventListener('click', () => {
@@ -884,6 +1216,18 @@ function buildStart() {
     playClick();
     el.remove(); stopTaglines();
     buildShop();
+  });
+
+  document.getElementById('btn-season').addEventListener('click', () => {
+    playClick();
+    el.remove(); stopTaglines();
+    buildSeasonPass();
+  });
+
+  document.getElementById('btn-leaderboard').addEventListener('click', () => {
+    playClick();
+    el.remove(); stopTaglines();
+    buildLeaderboard();
   });
 
   document.getElementById('btn-settings').addEventListener('click', () => {
@@ -916,29 +1260,178 @@ function buildStart() {
     cdIv = setInterval(updateCd, 1000);
   }
 
-  // Card shake + fast spin on button hover
+  // Card shake + grietas + explosión + reconstrucción al pasar el ratón por
+  // un botón de modo. Durante 10s de temblor creciente se van dibujando
+  // grietas de verdad (SVG) sobre la tarjeta; al llegar al pico, explota
+  // (implosiona + trozos + partículas) y se reconstruye en 3s completos con
+  // rebote. Si el ratón se va en cualquier momento, se corta todo al
+  // instante (nada se queda roto en pantalla).
   let shakeTween = null;
+  let crackSvg = null;
+  let revealedCracks = 0;
+  // Todos los setTimeout de la secuencia de explosión/reconstrucción viven
+  // aquí para poder cancelarlos de golpe si el ratón se va a media secuencia
+  // (si no, disparaban ráfagas/destellos sueltos sobre una tarjeta ya
+  // restaurada, o incluso sobre una secuencia nueva empezada después).
+  let pendingTimeouts = [];
+  function schedule(fn, ms) {
+    const id = setTimeout(() => { pendingTimeouts = pendingTimeouts.filter(t => t !== id); fn(); }, ms);
+    pendingTimeouts.push(id);
+    return id;
+  }
+  function clearPendingTimeouts() {
+    pendingTimeouts.forEach(id => clearTimeout(id));
+    pendingTimeouts = [];
+  }
+
+  const CRACK_PATHS = [
+    'M50,48 L38,30 L28,10', 'M50,48 L65,25 L80,8',
+    'M50,48 L20,55 L2,68',  'M50,48 L82,58 L98,72',
+    'M50,48 L46,80 L40,100', 'M50,48 L58,82 L64,102',
+    'M38,30 L48,15',        'M65,25 L58,10',
+  ];
+
+  function ensureCrackOverlay() {
+    if (crackSvg) return crackSvg;
+    el.style.position = 'relative'; // para que el SVG se alinee con la propia tarjeta
+    crackSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    crackSvg.setAttribute('viewBox', '0 0 100 100');
+    crackSvg.setAttribute('preserveAspectRatio', 'none');
+    crackSvg.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:40; overflow:visible;';
+    crackSvg.innerHTML = CRACK_PATHS.map((d, i) =>
+      `<path data-crack="${i}" d="${d}" fill="none" stroke="rgba(255,255,255,0.95)" stroke-width="0.6" stroke-linecap="round" style="filter:drop-shadow(0 0 3px rgba(255,255,255,0.85));"/>`
+    ).join('');
+    el.appendChild(crackSvg);
+    crackSvg.querySelectorAll('path').forEach(p => {
+      const len = p.getTotalLength();
+      p.style.strokeDasharray = String(len);
+      p.style.strokeDashoffset = String(len);
+    });
+    revealedCracks = 0;
+    return crackSvg;
+  }
+
+  function revealCracksUpTo(fraction) {
+    if (!crackSvg) return;
+    const target = Math.floor(fraction * CRACK_PATHS.length);
+    while (revealedCracks < target) {
+      const p = crackSvg.querySelector(`[data-crack="${revealedCracks}"]`);
+      if (p) {
+        gsap.to(p, { strokeDashoffset: 0, duration: 0.22, ease: 'power2.out' });
+        playTone(1300 + Math.random() * 500, 'square', 0.05, 0.045);
+      }
+      revealedCracks++;
+    }
+  }
+
+  function removeCracks() {
+    if (crackSvg) { crackSvg.remove(); crackSvg = null; }
+    revealedCracks = 0;
+  }
+
+  const resetCardTransform = () => {
+    gsap.killTweensOf(el);
+    clearPendingTimeouts();
+    removeCracks();
+    gsap.to(el, { x: 0, y: 0, rotation: 0, opacity: 1, scale: 1, duration: 0.3, ease: 'elastic.out(1, 0.5)' });
+  };
+
+  function shatterCard() {
+    if (!el.isConnected) return;
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    removeCracks(); // las grietas ya cumplieron su función, ahora se rompe de verdad
+
+    playTone(90, 'sawtooth', 0.3, 0.18);
+    screenFlash('#ffffff', { peak: 0.45, duration: 0.35 });
+    screenShake(document.body, { amp: 14, count: 6 });
+    vibrate([40, 20, 60]);
+
+    // Trozos de verdad (no solo puntitos): unos 9 fragmentos rectangulares
+    // que salen despedidos girando desde distintos puntos de la tarjeta.
+    const shardWrap = document.createElement('div');
+    shardWrap.style.cssText = 'position:fixed; inset:0; z-index:6500; pointer-events:none;';
+    document.body.appendChild(shardWrap);
+    const palette = ['#ff416c', '#ffd166', '#4cd964', '#45dcff', '#8b5cf6', '#ffffff'];
+    const shards = Array.from({ length: 9 }, () => {
+      const sx = rect.left + Math.random() * rect.width;
+      const sy = rect.top + Math.random() * rect.height;
+      const size = 18 + Math.random() * 30;
+      const s = document.createElement('div');
+      s.style.cssText = `position:fixed; left:${sx}px; top:${sy}px; width:${size}px; height:${size}px;
+        background:${palette[Math.floor(Math.random() * palette.length)]}; opacity:0.92; border-radius:3px;
+        box-shadow:0 0 10px rgba(255,255,255,0.3);`;
+      shardWrap.appendChild(s);
+      return { el: s, ang: Math.random() * Math.PI * 2, dist: 90 + Math.random() * 220 };
+    });
+    gsap.to(shards.map(s => s.el), {
+      x: (i) => Math.cos(shards[i].ang) * shards[i].dist,
+      y: (i) => Math.sin(shards[i].ang) * shards[i].dist - 40,
+      rotation: () => (Math.random() - 0.5) * 720,
+      opacity: 0, duration: 0.9, ease: 'power2.out',
+      onComplete: () => shardWrap.remove(),
+    });
+
+    // Ráfagas de partículas más pequeñas, repartidas por toda la tarjeta.
+    for (let i = 0; i < 5; i++) {
+      spawnBurst(rect.left + Math.random() * rect.width, rect.top + Math.random() * rect.height, { count: 14 });
+    }
+
+    // Nota: no se toca pointer-events aquí — ponerlo a "none" en la tarjeta
+    // mientras el ratón sigue encima del botón dispara mouseleave (dejar de
+    // ser el elemento "golpeado" por el cursor cuenta como salir), lo que
+    // cancelaría la propia explosión justo al empezar.
+    gsap.to(el, {
+      opacity: 0, scale: 0.35, rotation: (Math.random() - 0.5) * 50,
+      duration: 0.7, ease: 'power2.in',
+      onComplete: () => {
+        // Pausa real con la tarjeta desaparecida antes de reconstruirse.
+        gsap.set(el, { rotation: 0, scale: 0.12 });
+        schedule(() => {
+          if (!el.isConnected) return;
+          // Reconstrucción en 3 segundos completos, con un par de chispazos
+          // de partículas a mitad de camino para que se note que "vuelve".
+          spawnBurst(cx, cy, { count: 24, colors: ['#ffffff', '#45dcff', '#ffd166'] });
+          gsap.to(el, { opacity: 1, scale: 1, duration: 3, ease: 'elastic.out(1, 0.22)' });
+          schedule(() => spawnBurst(cx, cy, { count: 18, colors: ['#ff416c', '#4cd964', '#ffffff'] }), 900);
+          schedule(() => { screenFlash('#ffffff', { peak: 0.12, duration: 0.3 }); spawnBurst(cx, cy, { count: 22 }); }, 1900);
+        }, 700);
+      },
+    });
+  }
+
   const startShake = () => {
     if (shakeTween) shakeTween.kill();
+    removeCracks();
+    if (prefersReducedMotion) return; // sin motion: ni temblor ni explosión
+
+    ensureCrackOverlay();
     let intensity = 0;
-    const MAX_I  = 8;
-    const TICK   = 0.075;
-    const STEPS  = Math.round(10 / TICK);
+    const MAX_I = 16;
+    const RAMP_DURATION = 10; // segundos de temblor creciente antes de explotar
+    const TICK = 0.06;
+    const RAMP_STEPS = Math.round(RAMP_DURATION / TICK);
+    let step = 0;
     shakeTween = gsap.to(el, {
-      x: () => (Math.random() - 0.5) * intensity * 2.2,
-      y: () => (Math.random() - 0.5) * intensity * 1.3,
-      rotation: () => (Math.random() - 0.5) * intensity * 0.28,
+      x: () => (Math.random() - 0.5) * intensity * 2.8,
+      y: () => (Math.random() - 0.5) * intensity * 1.7,
+      rotation: () => (Math.random() - 0.5) * intensity * 0.4,
       duration: TICK,
-      repeat: -1,
+      repeat: RAMP_STEPS - 1,
       repeatRefresh: true,
       ease: 'none',
       force3D: true,
-      onRepeat() { intensity = Math.min(MAX_I, intensity + MAX_I / STEPS); },
+      onRepeat() {
+        step++;
+        intensity = Math.min(MAX_I, intensity + MAX_I / RAMP_STEPS);
+        revealCracksUpTo(step / RAMP_STEPS);
+      },
+      onComplete: shatterCard,
     });
   };
   const stopShake = () => {
     if (shakeTween) { shakeTween.kill(); shakeTween = null; }
-    gsap.to(el, { x: 0, y: 0, rotation: 0, duration: 0.3, ease: 'elastic.out(1, 0.5)' });
+    resetCardTransform();
   };
 
   ['btn-daily', 'btn-practice', 'btn-survival', 'btn-timed', 'btn-zen', 'btn-inverse'].forEach(id => {
@@ -964,6 +1457,8 @@ function buildStart() {
       playStartJingle(mode);
       const br = btn.getBoundingClientRect();
       spawnBurst(br.left + br.width / 2, br.top + br.height / 2, { count: 14 });
+      const modeColors = { daily: '#ffd166', practice: '#8b5cf6', survival: '#ff4136', timed: '#45dcff', zen: '#4cd964', inverse: '#ff6ec7' };
+      portalTransition(modeColors[mode] || '#ffffff');
       document.querySelectorAll('.play').forEach(b => b.style.pointerEvents = 'none');
       stopShake();
       gsap.to(el, { x: 0, y: 0, rotation: 0, duration: 0.1 });
@@ -1145,6 +1640,7 @@ function buildMemorize(color) {
         gsap.killTweensOf(glowEl);
         gsap.to(glowEl, { opacity: 0, duration: 0.3, onComplete: () => glowEl.remove() });
       }
+      colorWipe(hsvToCss(color.h, color.s, color.v));
       gsap.killTweensOf(el);
       gsap.to(el, {
         rotationY: -90, opacity: 0, duration: 0.4, ease: 'power2.in',
@@ -1180,6 +1676,7 @@ function buildMemorize(color) {
         gsap.killTweensOf(glowEl);
         gsap.to(glowEl, { opacity: 0, duration: 0.3, onComplete: () => glowEl.remove() });
       }
+      colorWipe(hsvToCss(color.h, color.s, color.v));
       gsap.killTweensOf(el);
       gsap.to(el, {
         rotationY: -90, opacity: 0, duration: 0.4, ease: 'power2.in',
@@ -1348,6 +1845,21 @@ function updatePicker() {
   });
 }
 
+// Estela de partículas al arrastrar los deslizadores: puramente decorativa
+// y reactiva a la velocidad de TU gesto, nunca a lo cerca que estés del
+// color objetivo (eso seguiría revelando la respuesta antes de tiempo).
+let lastTrailTime = 0;
+function spawnDragTrail(thumbId) {
+  if (DIFFS[diffIdx].blind) return; // en "A ciegas" no hay color que mostrar en la estela
+  const now = performance.now();
+  if (now - lastTrailTime < 55) return;
+  lastTrailTime = now;
+  const t = document.getElementById(thumbId);
+  if (!t) return;
+  const r = t.getBoundingClientRect();
+  spawnBurst(r.left + r.width / 2, r.top + r.height / 2, { count: 2, colors: [hsvToCss(P.h, P.s, P.v)] });
+}
+
 function setupDrag() {
   if (dragCtrl) dragCtrl.abort();
   dragCtrl = new AbortController();
@@ -1389,6 +1901,7 @@ function setupDrag() {
     if (P.h !== oldH) {
       playSliderSound(400 + (P.h / 360) * 400);
       updatePicker();
+      spawnDragTrail('hue-thumb');
     }
   });
   drag('sat-strip', 'sat-thumb', e => {
@@ -1398,6 +1911,7 @@ function setupDrag() {
     if (P.s !== oldS) {
       playSliderSound(300 + (P.s / 100) * 300);
       updatePicker();
+      spawnDragTrail('sat-thumb');
     }
   });
   drag('bri-strip', 'bri-thumb', e => {
@@ -1407,6 +1921,7 @@ function setupDrag() {
     if (P.v !== oldV) {
       playSliderSound(300 + (P.v / 100) * 300);
       updatePicker();
+      spawnDragTrail('bri-thumb');
     }
   });
 
@@ -1597,6 +2112,17 @@ function buildResult(target, guess, sc, bonusStr = '') {
     { width: (i, el) => el.dataset.width, delay: 0.95, duration: 0.7, stagger: 0.08, ease: 'power3.out' }
   );
 
+  // 10.00 exacto: cámara lenta real durante el conteo hasta el número, para
+  // que el momento más raro del juego se note. gsap.globalTimeline ralentiza
+  // TODO lo que esté animándose con GSAP en ese instante (efecto buscado:
+  // que se sienta como si el tiempo se congelase, no solo esta pantalla).
+  // El setTimeout usa tiempo real (no lo afecta el timeScale), así que
+  // siempre se restaura a los 900ms pase lo que pase.
+  if (sc >= 9.995 && !prefersReducedMotion) {
+    gsap.globalTimeline.timeScale(0.35);
+    setTimeout(() => gsap.globalTimeline.timeScale(1), 900);
+  }
+
   const counter = { value: 0 };
   const numEl = document.getElementById('res-num');
   gsap.to(counter, {
@@ -1630,6 +2156,12 @@ function buildResult(target, guess, sc, bonusStr = '') {
           onUpdate: () => { el.style.transform = `translate(${obj.x}px, ${obj.y}px)`; },
           onComplete: () => { el.style.transform = 'none'; }
         });
+        if (sc >= 9.995) {
+          // 10.00 exacto: el momento más raro del juego se nota más que un
+          // simple "¡PERFECTO!" — destello dorado + sacudida extra.
+          screenFlash('#ffd700', { peak: 0.4, duration: 0.6 });
+          screenShake(el, { amp: 16, count: 5 });
+        }
       }
     }
   });
@@ -1669,7 +2201,7 @@ function buildResult(target, guess, sc, bonusStr = '') {
         rotationY: -90, opacity: 0, duration: 0.35, ease: 'power2.in',
         onComplete: () => {
           el.remove();
-          if (G.timeUp) buildFinal();
+          if (G.timeUp) { colorWipe(`hsl(${Math.round(sc * 12)},70%,55%)`); buildFinal(); }
           else {
             G.round++;
             G.colors.push({ h: randInt(0, 359), s: randInt(40, 100), v: randInt(22, 82) });
@@ -1689,9 +2221,9 @@ function buildResult(target, guess, sc, bonusStr = '') {
       
       gsap.to(el, {
         rotationY: -90, opacity: 0, duration: 0.35, ease: 'power2.in',
-        onComplete: () => { 
-          el.remove(); 
-          if (G.lives <= 0) buildFinal();
+        onComplete: () => {
+          el.remove();
+          if (G.lives <= 0) { colorWipe(`hsl(${Math.round(sc * 12)},70%,55%)`); buildFinal(); }
           else {
             G.round++;
             G.colors.push({ h: randInt(0, 359), s: randInt(40, 100), v: randInt(22, 82) });
@@ -1706,7 +2238,11 @@ function buildResult(target, guess, sc, bonusStr = '') {
     G.round++;
     gsap.to(el, {
       rotationY: -90, opacity: 0, duration: 0.35, ease: 'power2.in',
-      onComplete: () => { el.remove(); G.round >= ROUNDS ? buildFinal() : buildMemorize(G.colors[G.round]); }
+      onComplete: () => {
+        el.remove();
+        if (G.round >= ROUNDS) { colorWipe(`hsl(${Math.round(sc * 12)},70%,55%)`); buildFinal(); }
+        else buildMemorize(G.colors[G.round]);
+      }
     });
   }, { once: true });
 }
@@ -1722,18 +2258,33 @@ function buildFinal() {
                   : G.mode === 'timed' ? Math.max(1, G.scores.length)
                   : ROUNDS;
   const avg = G.scores.reduce((a, b) => a + b, 0) / numRounds;
-  
+
+  // Duelo: solo cuenta como reto real si el enlace traía la puntuación del
+  // retador (enlaces viejos sin &score= siguen jugándose igual, sin comparación).
+  const isDuel = G.mode === 'challenge' && challengeTargetScore !== null;
+  const duelTied = isDuel && Math.abs(avg - challengeTargetScore) < 0.005;
+  const duelWon = isDuel && !duelTied && avg > challengeTargetScore;
+  if (isDuel) {
+    stats.c.duelsPlayed = (stats.c.duelsPlayed || 0) + 1;
+    if (duelWon) stats.c.duelsWon = (stats.c.duelsWon || 0) + 1;
+  }
+
+  const [, streakMult, streakLabel] = getStreakMult(G.combo);
+
   const baseInk = Math.floor(avg * numRounds + (G.combo * 5));
   const hasInkMult = (stats.inkMultiplierGames || 0) > 0;
-  const earnedInk = hasInkMult ? Math.floor(baseInk * 1.5) : baseInk;
+  const earnedInk = Math.floor(baseInk * streakMult * (hasInkMult ? 1.5 : 1) * (stats.permInkBoost ? 1.1 : 1));
   if (hasInkMult) stats.inkMultiplierGames--;
   stats.ink = (stats.ink || 0) + earnedInk;
-  
+
   const hasXpMult = (stats.xpMultiplierGames || 0) > 0;
-  const earnedXP = Math.floor(avg * 10 * numRounds) * (hasXpMult ? 2 : 1);
+  const earnedXP = Math.floor(avg * 10 * numRounds * streakMult * (hasXpMult ? 2 : 1) * (stats.permXpBoost ? 1.1 : 1));
   if (hasXpMult) stats.xpMultiplierGames--;
   stats.xp += earnedXP;
-  
+
+  const earnedSeasonPts = Math.max(1, Math.round(earnedXP / 3));
+  const newSeasonTiers = checkSeasonTiers(earnedSeasonPts);
+
   let leveledUp = false;
   while (stats.xp >= getXPNeeded(stats.level)) {
     stats.xp -= getXPNeeded(stats.level);
@@ -1744,12 +2295,15 @@ function buildFinal() {
   }
   
   stats.gamesPlayed++;
+  const isNewRecord = stats.gamesPlayed > 1 && stats.bestScore > 0 && avg > stats.bestScore;
   if (avg > stats.bestScore) stats.bestScore = avg;
   
   const today = getTodayStr();
   let shieldUsed = false;
   if (G.isDaily) {
     stats.dailyPlayed[today] = avg;
+    syncDailyFlagForSW();
+    submitDailyScore(avg);
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yStr = `${yesterday.getFullYear()}-${yesterday.getMonth()+1}-${yesterday.getDate()}`;
@@ -1799,6 +2353,7 @@ function buildFinal() {
   const newAch = checkAchievements({
     avg, scores: G.scores, perfects, numRounds, mode: G.mode,
     maxCombo: G.maxCombo || 0, blind: DIFFS[diffIdx].blind, fastNine: !!G.fastNine,
+    duelWon,
   });
   const awardsHtml = awards.map(a => `
     <div class="award-chip award-chip--${a.tone}">
@@ -1831,12 +2386,19 @@ function buildFinal() {
 
   el.innerHTML = `
     <div class="final-eyebrow">${{ daily: 'Desafío Diario', survival: 'Muerte Súbita', timed: 'Contrarreloj', zen: 'Modo Zen', inverse: 'Modo Inverso' }[G.mode] || 'Puntuación Final'}</div>
+    ${isDuel ? `<div class="duel-result-banner ${duelWon ? 'duel-won' : (duelTied ? 'duel-tied' : 'duel-lost')}" id="duel-result-banner">
+      ${duelWon ? `🏆 ¡GANASTE EL DUELO! ${avg.toFixed(2)} vs ${challengeTargetScore.toFixed(2)}`
+        : duelTied ? `🤝 EMPATE · ${avg.toFixed(2)} vs ${challengeTargetScore.toFixed(2)}`
+        : `💀 Perdiste el duelo · ${avg.toFixed(2)} vs ${challengeTargetScore.toFixed(2)}`}
+    </div>` : ''}
+    ${streakMult > 1 ? `<div class="streak-mult-banner" id="streak-mult-banner">${streakLabel} · Tinta y XP ×${streakMult}</div>` : ''}
+    ${isNewRecord ? `<div class="streak-mult-banner" id="new-record-banner" style="background:linear-gradient(90deg, rgba(255,215,0,0.22), rgba(76,217,100,0.18)); border-color:rgba(255,215,0,0.5);">🏆 ¡NUEVO RÉCORD PERSONAL! ${avg.toFixed(2)}</div>` : ''}
     <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
       <div class="ink-badge" title="Gotas de Tinta Ganadas${hasInkMult ? ' (Multiplicador x1.5 activo)' : ''}">
-        <span class="ink-drop">💧</span> +${earnedInk}${hasInkMult ? ' <span style="color:#ffcc00;font-size:0.7rem;font-weight:900;">x1.5</span>' : ''}
+        <span class="ink-drop">💧</span> +${earnedInk}${streakMult > 1 ? ` <span style="color:#ff9f45;font-size:0.7rem;font-weight:900;">×${streakMult}</span>` : ''}${hasInkMult ? ' <span style="color:#ffcc00;font-size:0.7rem;font-weight:900;">x1.5</span>' : ''}
       </div>
       <div class="ink-badge" style="border-color: rgba(76,217,100,0.3);" title="Experiencia Ganada${hasXpMult ? ' (XP x2 activo)' : ''}">
-        <span style="color:#4cd964;">✨</span> +${earnedXP} XP${hasXpMult ? ' <span style="color:#a78bfa;font-size:0.7rem;font-weight:900;">x2</span>' : ''}
+        <span style="color:#4cd964;">✨</span> +${earnedXP} XP${streakMult > 1 ? ` <span style="color:#ff9f45;font-size:0.7rem;font-weight:900;">×${streakMult}</span>` : ''}${hasXpMult ? ' <span style="color:#a78bfa;font-size:0.7rem;font-weight:900;">x2</span>' : ''}
       </div>
     </div>
     ${leveledUp ? `<div style="color:#4cd964; font-weight:900; font-size:1.4rem; margin-top:12px; text-shadow:0 0 15px rgba(76,217,100,0.5); animation: pulse 1s infinite;">¡SUBISTE AL NIVEL ${stats.level}! 🏆</div>` : ''}
@@ -1899,8 +2461,63 @@ function buildFinal() {
   gsap.set('#btn-replay', { y: 16, opacity: 0 });
   gsap.to('#btn-replay',  { y: 0, opacity: 1, delay: 1.1, duration: 0.4, ease: 'back.out(1.5)' });
 
-  if (avg >= 7) launchConfetti(avg);
+  if (avg >= 7) launchConfetti(avg, streakMult);
   if (newAch.length) showAchToasts(newAch);
+  if (newSeasonTiers.length) showSeasonTierToasts(newSeasonTiers, newAch.length ? 1200 + newAch.length * 3400 : 1200);
+
+  if (leveledUp) {
+    screenFlash('#4cd964', { peak: 0.3, duration: 0.7 });
+    screenShake(el, { amp: 12, count: 6 });
+  }
+
+  if (isNewRecord) {
+    const recordBanner = document.getElementById('new-record-banner');
+    if (recordBanner) {
+      gsap.fromTo(recordBanner, { y: -14, opacity: 0, scale: 0.85 },
+        { y: 0, opacity: 1, scale: 1, delay: 0.2, duration: 0.4, ease: 'back.out(2.2)' });
+    }
+    screenFlash('#ffd700', { peak: 0.3, duration: 0.7 });
+    fireworksShow(4, 1400);
+    playLevelUp();
+  }
+
+  if (isDuel) {
+    const duelBanner = document.getElementById('duel-result-banner');
+    if (duelBanner) {
+      gsap.fromTo(duelBanner, { y: -14, opacity: 0, scale: 0.85 },
+        { y: 0, opacity: 1, scale: 1, delay: 0.1, duration: 0.4, ease: 'back.out(2.2)' });
+      if (duelWon) {
+        setTimeout(() => {
+          const r = duelBanner.getBoundingClientRect();
+          spawnBurst(r.left + r.width / 2, r.top + r.height / 2,
+            { count: 18, colors: ['#ffd700', '#4cd964', '#ffffff'] });
+        }, 120);
+        screenFlash('#ffd700', { peak: 0.32, duration: 0.65 });
+        screenShake(el, { amp: 14, count: 7 });
+        playLevelUp();
+      } else if (!duelTied) {
+        playBeep();
+      }
+    }
+  }
+
+  if (streakMult > 1) {
+    const banner = document.getElementById('streak-mult-banner');
+    if (banner) {
+      gsap.fromTo(banner, { y: -14, opacity: 0, scale: 0.85 },
+        { y: 0, opacity: 1, scale: 1, delay: 0.15, duration: 0.4, ease: 'back.out(2.2)' });
+      setTimeout(() => {
+        const r = banner.getBoundingClientRect();
+        spawnBurst(r.left + r.width / 2, r.top + r.height / 2,
+          { count: Math.round(10 * streakMult), colors: ['#ff9f45', '#ffcc00', '#ff6b6b', '#ffffff'] });
+      }, 150);
+    }
+    if (streakMult >= 3) {
+      screenFlash('#ff9f45', { peak: 0.35, duration: 0.7 });
+      screenShake(el, { amp: 15, count: 8 });
+    }
+    playCombo(streakMult >= 3 ? 5 : 4);
+  }
 
   document.getElementById('btn-share').addEventListener('click', shareResult);
   
@@ -2007,7 +2624,43 @@ function renderShareCard() {
   x.fillStyle = '#555';
   x.font = '700 30px Inter, sans-serif';
   x.fillText('¿Me superas? → colormemory.vercel.app', W / 2, H - 56);
+
+  drawShareFrame(x, W, H);
   return c;
+}
+
+// Marco cosmético opcional sobre la tarjeta de compartir. Se dibuja al
+// final, encima de todo, como un borde — nunca tapa el contenido central.
+function drawShareFrame(x, W, H) {
+  const frame = stats.activeShareFrame;
+  if (!frame) return;
+  const pad = 22;
+  x.textAlign = 'center'; // por si algún borde deja el canvas en otro estado
+
+  if (frame === 'shareFrameGold') {
+    x.strokeStyle = '#ffd700'; x.lineWidth = 6;
+    x.strokeRect(pad, pad, W - pad * 2, H - pad * 2);
+    x.strokeStyle = 'rgba(255,215,0,0.4)'; x.lineWidth = 2;
+    x.strokeRect(pad + 10, pad + 10, W - (pad + 10) * 2, H - (pad + 10) * 2);
+  } else if (frame === 'shareFrameNeon') {
+    x.strokeStyle = 'rgba(0,229,255,0.85)'; x.lineWidth = 5;
+    x.strokeRect(pad, pad, W - pad * 2, H - pad * 2);
+    x.strokeStyle = 'rgba(255,0,229,0.6)'; x.lineWidth = 5;
+    x.strokeRect(pad + 8, pad + 8, W - (pad + 8) * 2, H - (pad + 8) * 2);
+  } else if (frame === 'shareFrameFloral') {
+    x.strokeStyle = 'rgba(255,182,213,0.8)'; x.lineWidth = 4;
+    x.strokeRect(pad, pad, W - pad * 2, H - pad * 2);
+    [[pad, pad], [W - pad, pad], [pad, H - pad], [W - pad, H - pad]].forEach(([cx, cy]) => {
+      for (let i = 0; i < 5; i++) {
+        const ang = (i / 5) * Math.PI * 2;
+        x.beginPath();
+        x.arc(cx + Math.cos(ang) * 14, cy + Math.sin(ang) * 14, 9, 0, Math.PI * 2);
+        x.fillStyle = 'rgba(255,182,213,0.55)';
+        x.fill();
+      }
+      x.beginPath(); x.arc(cx, cy, 7, 0, Math.PI * 2); x.fillStyle = '#fff7cc'; x.fill();
+    });
+  }
 }
 
 function shareResult() {
@@ -2033,7 +2686,8 @@ function shareResult() {
   const link = new URL(window.location.origin + window.location.pathname);
   link.searchParams.set('reto', G.seed);
   link.searchParams.set('diff', diffIdx);
-  text += `\n¡Te reto a superarme con mis colores!\n${link.toString()}`;
+  link.searchParams.set('score', avg.toFixed(2));
+  text += `\n¡Te reto a superar mi ${avg.toFixed(2)} con mis mismos colores!\n${link.toString()}`;
   
   // Imagen primero: tarjeta bonita para WhatsApp/Instagram; con degradado
   // de alternativas según lo que soporte el navegador.
@@ -2069,17 +2723,20 @@ function shareResult() {
 
 // ── CANVAS EFFECTS (CONFETTI & EXPLOSION) ───────────────────────────────────
 
-function launchConfetti(score) {
+function launchConfetti(score, intensityMult = 1) {
   const canvas = document.getElementById('confetti-canvas');
   const ctx    = canvas.getContext('2d');
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  const count = Math.floor(score * 20 + 40);
+  // El multiplicador de racha refuerza visualmente el premio, pero se limita
+  // a 2.2x para no disparar el coste en gama baja con "RACHA PERFECTA" (x3).
+  const count = Math.floor((score * 20 + 40) * Math.min(2.2, intensityMult));
   const cx    = canvas.width  / 2;
   const cy    = canvas.height * 0.55;
 
   const gameColors = (stats.premiumConfetti && G.colors?.length > 0) ? G.colors : null;
+  const skin = stats.activeSkin;
   const pieces = Array.from({ length: count }, (_, idx) => ({
     x: cx + (Math.random()-0.5)*120, y: cy,
     vx: (Math.random()-0.5)*16,
@@ -2100,9 +2757,23 @@ function launchConfetti(score) {
       p.x += p.vx; p.y += p.vy; p.angle += p.spin;
       if (p.y < canvas.height+20) alive = true;
       ctx.save();
-      ctx.translate(p.x, p.y); ctx.rotate(p.angle*Math.PI/180);
+      ctx.translate(p.x, p.y);
       ctx.fillStyle = p.color;
-      ctx.fillRect(-p.r, -p.r*0.5, p.r*2, p.r);
+      if (skin === 'skinCristal') {
+        // Burbujas: círculos suaves, sin rotación (no tiene sentido en un disco)
+        ctx.beginPath(); ctx.arc(0, 0, p.r * 0.75, 0, Math.PI * 2); ctx.fill();
+      } else if (skin === 'skinRetro') {
+        // Confeti "píxel": cuadrados sin rotar, a lo bloque
+        ctx.fillRect(-p.r * 0.6, -p.r * 0.6, p.r * 1.2, p.r * 1.2);
+      } else if (skin === 'skinCyberpunk') {
+        // Chispas: líneas finas brillantes
+        ctx.rotate(p.angle * Math.PI / 180);
+        ctx.shadowColor = p.color; ctx.shadowBlur = 6;
+        ctx.fillRect(-p.r * 1.6, -1, p.r * 3.2, 2);
+      } else {
+        ctx.rotate(p.angle * Math.PI / 180);
+        ctx.fillRect(-p.r, -p.r * 0.5, p.r * 2, p.r);
+      }
       ctx.restore();
     }
     if (alive) requestAnimationFrame(draw);
@@ -2180,6 +2851,122 @@ function buildHistory() {
       buildStart();
     }});
   });
+}
+
+// ── ESTADÍSTICAS Y ENTRENAMIENTO ─────────────────────────────────────────────
+
+const AXIS_NAMES = { h: 'Tono', s: 'Saturación', v: 'Brillo' };
+
+function computeComponentStats() {
+  let hSum = 0, sSum = 0, vSum = 0, n = 0;
+  for (const game of stats.history || []) {
+    for (const r of game.colors || []) {
+      if (!r.target || !r.guess) continue;
+      hSum += hueDelta(r.target.h, r.guess.h) / 180;
+      sSum += Math.abs(r.target.s - r.guess.s) / 100;
+      vSum += Math.abs(r.target.v - r.guess.v) / 100;
+      n++;
+    }
+  }
+  if (!n) return null;
+  return { h: hSum / n, s: sSum / n, v: vSum / n, rounds: n };
+}
+
+function drawStatsChart(canvas) {
+  const hist = (stats.history || []).slice(-20);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width = Math.max(2, canvas.clientWidth * 2); // nitidez retina
+  const Hc = canvas.height = 240;
+  ctx.clearRect(0, 0, W, Hc);
+  const pad = 24;
+  const xs = i => pad + i * (W - pad * 2) / (hist.length - 1);
+  const ys = v => Hc - pad - (v / 10) * (Hc - pad * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth = 2;
+  [2.5, 5, 7.5].forEach(v => { ctx.beginPath(); ctx.moveTo(pad, ys(v)); ctx.lineTo(W - pad, ys(v)); ctx.stroke(); });
+  ctx.beginPath();
+  hist.forEach((g, i) => { i ? ctx.lineTo(xs(i), ys(g.score)) : ctx.moveTo(xs(0), ys(g.score)); });
+  ctx.strokeStyle = '#45dcff';
+  ctx.lineWidth = 4;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  hist.forEach((g, i) => {
+    ctx.beginPath();
+    ctx.arc(xs(i), ys(g.score), 7, 0, Math.PI * 2);
+    ctx.fillStyle = `hsl(${Math.round(g.score * 12)},70%,60%)`;
+    ctx.fill();
+  });
+}
+
+function buildStatsScreen() {
+  const el = document.createElement('div');
+  el.className = 'card shop-card';
+  app.appendChild(el);
+
+  const comp = computeComponentStats();
+  let weak = null;
+  let compHtml = '<div style="text-align:center; color:#555; padding:30px 0; font-size:0.85rem;">Juega unas partidas para ver tu análisis.</div>';
+  let trainHtml = '';
+  if (comp) {
+    weak = ['h', 's', 'v'].reduce((a, b) => comp[a] >= comp[b] ? a : b);
+    compHtml = ['h', 's', 'v'].map(k => {
+      const acc = Math.max(0, Math.round((1 - comp[k]) * 100));
+      const hue = Math.round((acc / 100) * 120);
+      return `
+        <div class="comp-row${k === weak ? ' weak' : ''}">
+          <span class="comp-name">${AXIS_NAMES[k]}${k === weak ? ' ⚠️' : ''}</span>
+          <div class="res-analysis-track"><span style="width:${acc}%; background:hsl(${hue},70%,58%)"></span></div>
+          <span class="comp-val">${acc}%</span>
+        </div>`;
+    }).join('');
+    trainHtml = `
+      <div class="train-callout">
+        <div><strong>Tu punto débil: ${AXIS_NAMES[weak]}</strong><br><span>Practica con colores diseñados para forzar justo ese componente.</span></div>
+        <button id="btn-train" class="btn-train">🎯 Entrenar ${AXIS_NAMES[weak]}</button>
+      </div>`;
+  }
+
+  const hist = stats.history || [];
+  el.innerHTML = `
+    <div class="shop-header">
+      <div class="shop-title" style="font-size:1.5rem;">Estadísticas</div>
+      <button id="btn-stats-close" class="btn-icon-close" aria-label="Cerrar estadísticas">&times;</button>
+    </div>
+    <div class="custom-scrollbar" style="overflow-y:auto; flex:1; padding-right:4px; display:flex; flex-direction:column; gap:14px;">
+      <div>
+        <div class="shop-section-title">📈 Evolución (últimas ${Math.min(20, hist.length)} partidas)</div>
+        <div class="stats-chart-wrap"><canvas id="stats-chart"></canvas></div>
+      </div>
+      <div>
+        <div class="shop-section-title">🎯 Precisión por componente</div>
+        ${compHtml}
+      </div>
+      ${trainHtml}
+      <div class="stats-mini-row">
+        <div class="stat"><div class="stat-val">${stats.c?.perfectRounds || 0}</div><div class="stat-lbl">Perfectas</div></div>
+        <div class="stat"><div class="stat-val">${stats.c?.maxCombo || 0}</div><div class="stat-lbl">Mejor combo</div></div>
+        <div class="stat"><div class="stat-val">${stats.c?.totalRounds || 0}</div><div class="stat-lbl">Rondas</div></div>
+      </div>
+    </div>
+  `;
+  requestAnimationFrame(() => {
+    const cv = document.getElementById('stats-chart');
+    if (!cv) return;
+    if (hist.length >= 2) drawStatsChart(cv);
+    else cv.parentElement.innerHTML = '<div style="text-align:center; color:#555; padding:24px 0; font-size:0.8rem;">Aún no hay suficientes partidas.</div>';
+  });
+  document.getElementById('btn-stats-close').addEventListener('click', () => {
+    playClick();
+    gsap.to(el, { y: 20, opacity: 0, duration: 0.2, onComplete: () => { el.remove(); buildStart(); } });
+  });
+  const bt = document.getElementById('btn-train');
+  if (bt) bt.addEventListener('click', () => {
+    playClick();
+    playStartJingle('practice');
+    gsap.to(el, { y: -28, opacity: 0, scale: 0.97, duration: 0.3, ease: 'power2.in',
+      onComplete: () => { el.remove(); buildCountdown(() => startGame('training', { axis: weak })); } });
+  }, { once: true });
+  gsap.fromTo(el, { y: 60, opacity: 0, scale: 0.97 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, ease: 'back.out(1.5)' });
 }
 
 // ── CALENDARIO DEL DIARIO ────────────────────────────────────────────────────
@@ -2298,6 +3085,8 @@ const ACHIEVEMENTS = [
   { id: 'disaster',   icon: '🙈', name: 'Día de Furia',           desc: 'Puntúa menos de 2.00 en una ronda… nos pasa a todos.', ink: 15, check: (s, c, g) => g && g.scores.some(x => x < 2) },
   { id: 'challenger', icon: '⚔️', name: 'Retador',                desc: 'Juega el reto de un amigo.', ink: 40,  check: (s, c) => (c.challenges || 0) >= 1 },
   { id: 'speed',      icon: '🚀', name: 'Rayo Veloz',             desc: 'Nota 9+ con bonus de velocidad del 12% o más.', ink: 90,  check: (s, c, g) => g && g.fastNine },
+  { id: 'duelist1',   icon: '⚔️', name: 'Primera Sangre',         desc: 'Gana tu primer duelo contra un amigo.', ink: 60,  check: (s, c, g) => g && g.duelWon },
+  { id: 'duelist10',  icon: '🗡️', name: 'Espadachín Cromático',   desc: 'Gana 10 duelos contra amigos.', ink: 250, check: (s, c) => (c.duelsWon || 0) >= 10 },
 ];
 
 function checkAchievements(g) {
@@ -2333,6 +3122,24 @@ function showAchToasts(list, startDelay = 1200) {
       gsap.fromTo(t, { y: -70, opacity: 0, scale: 0.92 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: 'back.out(1.8)' });
       gsap.to(t, { y: -70, opacity: 0, duration: 0.35, delay: 3, ease: 'power2.in', onComplete: () => t.remove() });
       setTimeout(() => t.remove(), 4200); // red de seguridad
+    }, startDelay + i * 3400);
+  });
+}
+
+function showSeasonTierToasts(list, startDelay = 1200) {
+  list.forEach((tier, i) => {
+    setTimeout(() => {
+      const t = document.createElement('div');
+      t.className = 'ach-toast';
+      const label = tier.theme ? 'Tema exclusivo desbloqueado' : `Tramo ${tier.tier + 1} del Pase`;
+      t.innerHTML = `<span class="ach-toast-icon">🎟️</span>
+        <span class="ach-toast-info"><strong>¡Pase de Temporada!</strong>${label} <em>+${tier.ink} 💧</em></span>`;
+      document.body.appendChild(t);
+      playSuccess();
+      vibrate(40);
+      gsap.fromTo(t, { y: -70, opacity: 0, scale: 0.92 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: 'back.out(1.8)' });
+      gsap.to(t, { y: -70, opacity: 0, duration: 0.35, delay: 3, ease: 'power2.in', onComplete: () => t.remove() });
+      setTimeout(() => t.remove(), 4200);
     }, startDelay + i * 3400);
   });
 }
@@ -2378,6 +3185,18 @@ function buildAchievements() {
 
 // ── SHOP ─────────────────────────────────────────────────────────────────────
 
+// Tipos de ítem "equipables" (se poseen una vez y se activan/desactivan,
+// a diferencia de los consumibles que se gastan). Cada uno guarda su lista
+// de desbloqueados y cuál está activo en dos claves de stats distintas.
+const EQUIP_TYPES = {
+  theme:      { unlockedKey: 'unlockedThemes',      activeKey: 'activeTheme'      },
+  title:      { unlockedKey: 'unlockedTitles',      activeKey: 'activeTitle'      },
+  uiskin:     { unlockedKey: 'unlockedSkins',       activeKey: 'activeSkin'       },
+  frame:      { unlockedKey: 'unlockedFrames',      activeKey: 'activeFrame'      },
+  cursor:     { unlockedKey: 'unlockedCursors',     activeKey: 'activeCursor'     },
+  shareframe: { unlockedKey: 'unlockedShareFrames', activeKey: 'activeShareFrame' },
+};
+
 const SHOP_ITEMS = [
   {
     id: 'extraHint',
@@ -2387,6 +3206,7 @@ const SHOP_ITEMS = [
     icon: '💡',
     stat: 'extraHints',
     maxStack: 3,
+    section: 'upgrades',
   },
   {
     id: 'extraTime',
@@ -2396,6 +3216,7 @@ const SHOP_ITEMS = [
     icon: '⏱️',
     stat: 'extraTime',
     maxStack: 3,
+    section: 'upgrades',
   },
   {
     id: 'extraRetry',
@@ -2405,6 +3226,7 @@ const SHOP_ITEMS = [
     icon: '🔄',
     stat: 'extraRetry',
     maxStack: 3,
+    section: 'upgrades',
   },
   {
     id: 'inkMultiplier',
@@ -2414,6 +3236,7 @@ const SHOP_ITEMS = [
     icon: '💰',
     stat: 'inkMultiplierGames',
     perPurchase: 5,
+    section: 'upgrades',
   },
   {
     id: 'xpMultiplier',
@@ -2423,6 +3246,7 @@ const SHOP_ITEMS = [
     icon: '⚡',
     stat: 'xpMultiplierGames',
     perPurchase: 3,
+    section: 'upgrades',
   },
   {
     id: 'streakShield',
@@ -2432,6 +3256,7 @@ const SHOP_ITEMS = [
     icon: '🛡️',
     stat: 'streakShield',
     maxStack: 3,
+    section: 'upgrades',
   },
   {
     id: 'themeForest',
@@ -2440,6 +3265,7 @@ const SHOP_ITEMS = [
     price: 350,
     icon: '🌿',
     type: 'theme',
+    section: 'cosmetics',
   },
   {
     id: 'themeOcean',
@@ -2448,6 +3274,7 @@ const SHOP_ITEMS = [
     price: 350,
     icon: '🌊',
     type: 'theme',
+    section: 'cosmetics',
   },
   {
     id: 'themeFire',
@@ -2456,6 +3283,34 @@ const SHOP_ITEMS = [
     price: 350,
     icon: '🔥',
     type: 'theme',
+    section: 'cosmetics',
+  },
+  {
+    id: 'themeSpace',
+    name: 'Tema Espacio',
+    desc: 'Estrellas violeta-azuladas que titilan lentamente en el fondo. Cosmético permanente.',
+    price: 380,
+    icon: '✨',
+    type: 'theme',
+    section: 'cosmetics',
+  },
+  {
+    id: 'themeSakura',
+    name: 'Tema Sakura',
+    desc: 'Pétalos rosas que caen revoloteando por la pantalla. Cosmético permanente.',
+    price: 380,
+    icon: '🌸',
+    type: 'theme',
+    section: 'cosmetics',
+  },
+  {
+    id: 'themeNeon',
+    name: 'Tema Neón',
+    desc: 'Rombos eléctricos que ciclan de color sin parar. El más vistoso de todos.',
+    price: 450,
+    icon: '🟦',
+    type: 'theme',
+    section: 'cosmetics',
   },
   {
     id: 'tintero',
@@ -2465,6 +3320,7 @@ const SHOP_ITEMS = [
     icon: '🖊️',
     type: 'title',
     titleText: '🖊️ Maestro Tintero',
+    section: 'cosmetics',
   },
   {
     id: 'chromatico',
@@ -2474,6 +3330,7 @@ const SHOP_ITEMS = [
     icon: '🌈',
     type: 'title',
     titleText: '🌈 Cromático Supreme',
+    section: 'cosmetics',
   },
   {
     id: 'premiumConfetti',
@@ -2483,8 +3340,208 @@ const SHOP_ITEMS = [
     icon: '🎊',
     type: 'oneshot',
     stat: 'premiumConfetti',
+    section: 'cosmetics',
+  },
+  {
+    id: 'permHintBoost',
+    name: 'Ojo Entrenado',
+    desc: 'Todas tus partidas empiezan con 1 pista adicional permanente, para siempre. Se suma a la Pista Extra.',
+    price: 600,
+    icon: '👁️',
+    type: 'oneshot',
+    stat: 'permHintBoost',
+    section: 'progression',
+  },
+  {
+    id: 'permTimeBoost',
+    name: 'Memoria de Hierro',
+    desc: 'Todas tus partidas empiezan con 1 segundo extra de memorización, para siempre. Se suma a Tiempo +1s.',
+    price: 600,
+    icon: '🧠',
+    type: 'oneshot',
+    stat: 'permTimeBoost',
+    section: 'progression',
+  },
+  {
+    id: 'permRetryBoost',
+    name: 'Manual del Maestro',
+    desc: 'Todas tus partidas incluyen una Segunda Oportunidad gratis, para siempre. Se suma a las que compres.',
+    price: 750,
+    icon: '📖',
+    type: 'oneshot',
+    stat: 'permRetryBoost',
+    section: 'progression',
+  },
+  {
+    id: 'permInkBoost',
+    name: 'Tintero Infinito',
+    desc: 'Ganas un 10% más de Tinta en todas las partidas, para siempre. Se acumula con otros multiplicadores.',
+    price: 900,
+    icon: '💎',
+    type: 'oneshot',
+    stat: 'permInkBoost',
+    section: 'progression',
+  },
+  {
+    id: 'permXpBoost',
+    name: 'Cerebro Cromático',
+    desc: 'Ganas un 10% más de Experiencia en todas las partidas, para siempre. Se acumula con otros multiplicadores.',
+    price: 900,
+    icon: '🧬',
+    type: 'oneshot',
+    stat: 'permXpBoost',
+    section: 'progression',
+  },
+  {
+    id: 'skinCristal',
+    name: 'Skin: Cristal',
+    desc: 'Reskin completo: tarjetas de cristal pulido, transiciones de desenfoque líquido y sonidos de campanillas. Permanente.',
+    price: 700,
+    icon: '💎',
+    type: 'uiskin',
+    section: 'cosmetics',
+  },
+  {
+    id: 'skinRetro',
+    name: 'Skin: Retro Arcade',
+    desc: 'Reskin completo: bordes duros estilo CRT, transición de escaneo con scanlines y sonidos 8-bit. Permanente.',
+    price: 700,
+    icon: '🕹️',
+    type: 'uiskin',
+    section: 'cosmetics',
+  },
+  {
+    id: 'skinCyberpunk',
+    name: 'Skin: Cyberpunk Neón',
+    desc: 'Reskin completo: bordes glitch con separación RGB, transición de interferencia y sonidos synth. Permanente.',
+    price: 700,
+    icon: '🌆',
+    type: 'uiskin',
+    section: 'cosmetics',
+  },
+  {
+    id: 'frameFire',
+    name: 'Marco: Llamas',
+    desc: 'Borde animado de fuego alrededor de tu insignia de tinta. Permanente.',
+    price: 220,
+    icon: '🔥',
+    type: 'frame',
+    section: 'cosmetics',
+  },
+  {
+    id: 'frameIce',
+    name: 'Marco: Hielo',
+    desc: 'Borde animado con brillo helado alrededor de tu insignia de tinta. Permanente.',
+    price: 220,
+    icon: '❄️',
+    type: 'frame',
+    section: 'cosmetics',
+  },
+  {
+    id: 'frameGold',
+    name: 'Marco: Dorado',
+    desc: 'Borde con destello dorado girando alrededor de tu insignia de tinta. Permanente.',
+    price: 260,
+    icon: '👑',
+    type: 'frame',
+    section: 'cosmetics',
+  },
+  {
+    id: 'cursorDrop',
+    name: 'Cursor: Gota',
+    desc: 'El puntero del ratón se convierte en una gota de tinta. Permanente.',
+    price: 150,
+    icon: '💧',
+    type: 'cursor',
+    section: 'cosmetics',
+  },
+  {
+    id: 'cursorStar',
+    name: 'Cursor: Estrella',
+    desc: 'El puntero del ratón se convierte en una estrella dorada. Permanente.',
+    price: 150,
+    icon: '⭐',
+    type: 'cursor',
+    section: 'cosmetics',
+  },
+  {
+    id: 'cursorDiamond',
+    name: 'Cursor: Diamante',
+    desc: 'El puntero del ratón se convierte en un diamante cian. Permanente.',
+    price: 150,
+    icon: '💠',
+    type: 'cursor',
+    section: 'cosmetics',
+  },
+  {
+    id: 'shareFrameGold',
+    name: 'Marco de Tarjeta: Dorado',
+    desc: 'Añade un marco dorado a tu tarjeta de resultado al compartirla. Permanente.',
+    price: 180,
+    icon: '🖼️',
+    type: 'shareframe',
+    section: 'cosmetics',
+  },
+  {
+    id: 'shareFrameNeon',
+    name: 'Marco de Tarjeta: Neón',
+    desc: 'Añade un marco de doble línea neón a tu tarjeta de resultado. Permanente.',
+    price: 180,
+    icon: '🎴',
+    type: 'shareframe',
+    section: 'cosmetics',
+  },
+  {
+    id: 'shareFrameFloral',
+    name: 'Marco de Tarjeta: Floral',
+    desc: 'Añade esquinas decoradas con flores a tu tarjeta de resultado. Permanente.',
+    price: 180,
+    icon: '🌸',
+    type: 'shareframe',
+    section: 'cosmetics',
+  },
+  {
+    id: 'skinHalloween',
+    name: 'Skin: Halloween',
+    desc: 'Reskin de temporada: naranja/morado, murciélagos y sonidos siniestros. Solo disponible del 20 al 31 de octubre.',
+    price: 700,
+    icon: '🎃',
+    type: 'uiskin',
+    section: 'cosmetics',
+    seasonal: { startMonth: 10, startDay: 20, endMonth: 10, endDay: 31 },
+  },
+  {
+    id: 'skinXmas',
+    name: 'Skin: Navidad',
+    desc: 'Reskin de temporada: rojo/verde con nieve cayendo y campanillas. Solo disponible del 15 al 31 de diciembre.',
+    price: 700,
+    icon: '🎄',
+    type: 'uiskin',
+    section: 'cosmetics',
+    seasonal: { startMonth: 12, startDay: 15, endMonth: 12, endDay: 31 },
+  },
+  {
+    id: 'skinSummer',
+    name: 'Skin: Verano',
+    desc: 'Reskin de temporada: amarillo/turquesa con destellos de sol. Solo disponible del 21 de junio al 21 de septiembre.',
+    price: 700,
+    icon: '🏖️',
+    type: 'uiskin',
+    section: 'cosmetics',
+    seasonal: { startMonth: 6, startDay: 21, endMonth: 9, endDay: 21 },
   },
 ];
+
+// Ventana de fechas de un cosmético "de temporada" (null = sin restricción,
+// siempre disponible). Soporta rangos que cruzan fin de año (ej. dic→ene).
+function isSeasonalItemAvailable(item) {
+  if (!item.seasonal) return true;
+  const now = new Date();
+  const cur = (now.getMonth() + 1) * 100 + now.getDate();
+  const start = item.seasonal.startMonth * 100 + item.seasonal.startDay;
+  const end = item.seasonal.endMonth * 100 + item.seasonal.endDay;
+  return start <= end ? (cur >= start && cur <= end) : (cur >= start || cur <= end);
+}
 
 function buildShop() {
   const el = document.createElement('div');
@@ -2507,30 +3564,33 @@ function buildShop() {
 
   function renderItems(items) {
     return items.map(item => {
-      const isTheme   = item.type === 'theme';
-      const isTitle   = item.type === 'title';
+      const equip     = EQUIP_TYPES[item.type];
       const isOneshot = item.type === 'oneshot';
-      const isOwned   = isTheme  ? (stats.unlockedThemes || []).includes(item.id)
-                      : isTitle  ? (stats.unlockedTitles || []).includes(item.id)
+      const isOwned   = equip     ? (stats[equip.unlockedKey] || []).includes(item.id)
                       : isOneshot ? !!stats[item.stat]
                       : false;
-      const isActive  = (isTheme  && stats.activeTheme === item.id)
-                     || (isTitle  && stats.activeTitle  === item.id)
+      const isActive  = (equip && stats[equip.activeKey] === item.id)
                      || (isOneshot && !!stats[item.stat]);
-      const owned     = (!isTheme && !isTitle && !isOneshot) ? (stats[item.stat] || 0) : 0;
+      const owned     = (!equip && !isOneshot) ? (stats[item.stat] || 0) : 0;
       const affordable = (stats.ink || 0) >= item.price;
       const atMaxStack = item.maxStack !== undefined && owned >= item.maxStack;
+      // Un cosmético "de temporada" ya comprado se conserva y se puede
+      // equipar siempre — la fecha solo bloquea la COMPRA, no el uso.
+      const seasonalOpen = isSeasonalItemAvailable(item);
 
       let btnClass = 'shop-item-btn';
       let btnDisabled = '';
       let btnLabel = `<span class="ink-drop">💧</span> ${item.price}`;
 
-      if (isTheme || isTitle || isOneshot) {
+      if (equip || isOneshot) {
         if (isActive) {
           btnClass += ' active-theme'; btnDisabled = 'disabled';
           btnLabel = '✓ Activo';
         } else if (isOwned && !isOneshot) {
           btnLabel = 'Equipar';
+        } else if (item.seasonal && !seasonalOpen) {
+          btnClass += ' disabled'; btnDisabled = 'disabled';
+          btnLabel = 'Fuera de temporada';
         } else if (!affordable) {
           btnClass += ' disabled'; btnDisabled = 'disabled';
         }
@@ -2545,6 +3605,9 @@ function buildShop() {
       if (owned > 0) {
         const stackInfo = item.maxStack ? ` / ${item.maxStack}` : '';
         ownedHtml = `<div class="shop-item-owned">${item.perPurchase ? `<strong>${owned}</strong> partidas restantes` : `Tienes: <strong>${owned}</strong>${stackInfo}`}</div>`;
+      } else if (item.seasonal && !isOwned) {
+        const s = item.seasonal;
+        ownedHtml = `<div class="shop-item-owned">${seasonalOpen ? '🎉 ¡Disponible ahora!' : `Disponible del ${s.startDay} de ${MONTH_NAMES[s.startMonth - 1]} al ${s.endDay} de ${MONTH_NAMES[s.endMonth - 1]}`}</div>`;
       }
 
       return `
@@ -2571,8 +3634,26 @@ function buildShop() {
     }).join('');
   }
 
-  const upgrades  = SHOP_ITEMS.filter(i => !i.type || i.type === 'consumable');
-  const cosmetics = SHOP_ITEMS.filter(i =>  i.type && i.type !== 'consumable');
+  const SECTIONS = [
+    { id: 'upgrades',    label: 'Mejoras',    emoji: '⚡' },
+    { id: 'cosmetics',   label: 'Cosmética',  emoji: '🎨' },
+    { id: 'progression', label: 'Progresión', emoji: '🏆' },
+  ];
+  let activeSection = 'upgrades';
+
+  function itemsForSection(id) {
+    return SHOP_ITEMS.filter(i => (i.section || 'upgrades') === id);
+  }
+
+  function renderTabs() {
+    return SECTIONS.map(s => `
+      <button class="preset-btn shop-tab-btn${activeSection === s.id ? ' active' : ''}" data-section="${s.id}">${s.emoji}<br>${s.label}</button>
+    `).join('');
+  }
+
+  function renderSection() {
+    document.getElementById('shop-items').innerHTML = renderItems(itemsForSection(activeSection));
+  }
 
   el.innerHTML = `
     <div class="shop-header">
@@ -2584,11 +3665,9 @@ function buildShop() {
       <span id="shop-ink-count">${renderInk()}</span>
       <span style="color:#666; font-size:0.75rem; margin-left:2px;">gotas disponibles</span>
     </div>
+    <div class="preset-row" id="shop-tabs" style="margin:2px 0 10px;">${renderTabs()}</div>
     <div class="custom-scrollbar" style="overflow-y:auto; flex:1; padding-right:4px;">
-      <div class="shop-section-title">⚡ Mejoras</div>
-      <div id="shop-upgrades">${renderItems(upgrades)}</div>
-      <div class="shop-section-title" style="margin-top:8px;">🎨 Estética</div>
-      <div id="shop-cosmetics">${renderItems(cosmetics)}</div>
+      <div id="shop-items">${renderItems(itemsForSection(activeSection))}</div>
     </div>
   `;
   app.appendChild(el);
@@ -2598,6 +3677,19 @@ function buildShop() {
     { y: 0,  opacity: 1, scale: 1, duration: 0.35, ease: 'back.out(1.5)' }
   );
 
+  document.getElementById('shop-tabs').addEventListener('click', e => {
+    const tabBtn = e.target.closest('.shop-tab-btn');
+    if (!tabBtn || tabBtn.dataset.section === activeSection) return;
+    cancelConfirm();
+    playClick();
+    activeSection = tabBtn.dataset.section;
+    document.querySelectorAll('#shop-tabs .shop-tab-btn')
+      .forEach(b => b.classList.toggle('active', b.dataset.section === activeSection));
+    renderSection();
+    const container = document.getElementById('shop-items');
+    gsap.fromTo(container, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.25, ease: 'power2.out' });
+  });
+
   function doPurchase(btn) {
     const price       = parseInt(btn.dataset.price);
     const stat        = btn.dataset.stat;
@@ -2606,19 +3698,25 @@ function buildShop() {
     const itemType    = btn.dataset.type;
     const itemDef     = SHOP_ITEMS.find(i => i.id === itemId);
 
-    if (itemType === 'theme' || itemType === 'title') {
-      const unlockedKey = itemType === 'theme' ? 'unlockedThemes' : 'unlockedTitles';
-      const activeKey   = itemType === 'theme' ? 'activeTheme'    : 'activeTitle';
+    if (EQUIP_TYPES[itemType]) {
+      const { unlockedKey, activeKey } = EQUIP_TYPES[itemType];
       const alreadyOwned = (stats[unlockedKey] || []).includes(itemId);
       if (!alreadyOwned) {
         if ((stats.ink || 0) < price) return;
+        if (itemDef?.seasonal && !isSeasonalItemAvailable(itemDef)) return;
         stats.ink -= price;
         stats.c.inkSpent = (stats.c.inkSpent || 0) + price;
         stats[unlockedKey] = [...(stats[unlockedKey] || []), itemId];
       }
       stats[activeKey] = itemId;
       saveStats(); playSuccess(); vibrate(30);
-      gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
+      if (itemType === 'theme') updateAuroraColors();
+      if (itemType === 'uiskin') applySkin();
+      if (itemType === 'cursor') applyCursor();
+      const pr = btn.getBoundingClientRect();
+      spawnBurst(pr.left + pr.width / 2, pr.top + pr.height / 2, { count: 14, colors: ['#00d0ff', '#7ee8ff', '#ffffff'] });
+      document.getElementById('shop-ink-count').textContent = renderInk();
+      renderSection();
       return;
     }
 
@@ -2628,7 +3726,10 @@ function buildShop() {
       stats.c.inkSpent = (stats.c.inkSpent || 0) + price;
       stats[stat] = true;
       saveStats(); playSuccess(); vibrate(30);
-      gsap.to(el, { y: 20, opacity: 0, duration: 0.15, onComplete: () => { el.remove(); buildShop(); } });
+      const pr = btn.getBoundingClientRect();
+      spawnBurst(pr.left + pr.width / 2, pr.top + pr.height / 2, { count: 14, colors: ['#00d0ff', '#7ee8ff', '#ffffff'] });
+      document.getElementById('shop-ink-count').textContent = renderInk();
+      renderSection();
       return;
     }
 
@@ -2683,35 +3784,38 @@ function buildShop() {
     }, 1200);
   }
 
-  el.querySelectorAll('.shop-item-btn:not([disabled])').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
+  // Delegado en el contenedor (no en cada botón): las pestañas reemplazan el
+  // HTML de #shop-items al cambiar de sección, y los botones nuevos deben
+  // quedar clicables sin tener que volver a enlazar listeners uno a uno.
+  document.getElementById('shop-items').addEventListener('click', e => {
+    const btn = e.target.closest('.shop-item-btn');
+    if (!btn || btn.disabled) return;
+    e.stopPropagation();
 
-      const itemId   = btn.dataset.id;
-      const itemType = btn.dataset.type;
-      const unlockedKey = itemType === 'theme' ? 'unlockedThemes' : 'unlockedTitles';
-      const isEquip = (itemType === 'theme' || itemType === 'title') && (stats[unlockedKey] || []).includes(itemId);
+    const itemId   = btn.dataset.id;
+    const itemType = btn.dataset.type;
+    const equip = EQUIP_TYPES[itemType];
+    const isEquip = equip && (stats[equip.unlockedKey] || []).includes(itemId);
 
-      if (isEquip) { doPurchase(btn); return; }
+    if (isEquip) { doPurchase(btn); return; }
 
-      if (confirmingBtn === btn) {
-        cancelConfirm();
-        doPurchase(btn);
-        return;
-      }
-
+    if (confirmingBtn === btn) {
       cancelConfirm();
-      confirmingBtn = btn;
-      btn._origHtml = btn.innerHTML;
-      btn.innerHTML = '¿Confirmar?';
-      btn.style.background = 'rgba(255,165,0,0.15)';
-      btn.style.color = '#ffaa00';
-      btn.style.border = '1px solid rgba(255,165,0,0.35)';
+      doPurchase(btn);
+      return;
+    }
 
-      confirmTimeout = setTimeout(() => {
-        if (confirmingBtn === btn) cancelConfirm();
-      }, 2500);
-    });
+    cancelConfirm();
+    confirmingBtn = btn;
+    btn._origHtml = btn.innerHTML;
+    btn.innerHTML = '¿Confirmar?';
+    btn.style.background = 'rgba(255,165,0,0.15)';
+    btn.style.color = '#ffaa00';
+    btn.style.border = '1px solid rgba(255,165,0,0.35)';
+
+    confirmTimeout = setTimeout(() => {
+      if (confirmingBtn === btn) cancelConfirm();
+    }, 2500);
   });
 
   el.addEventListener('click', () => cancelConfirm());
@@ -2725,6 +3829,186 @@ function buildShop() {
   });
 }
 
+// ── TEMPORADAS / PASE DE BATALLA ─────────────────────────────────────────────
+
+function buildSeasonPass() {
+  const { seasonNum, seasonId, daysLeft } = getSeasonInfo();
+  if (stats.seasonId !== seasonId) {
+    // Ver el pase sin haber jugado aún esta temporada: arranca en 0 sin
+    // esperar a que termine una partida.
+    stats.seasonId = seasonId;
+    stats.seasonPoints = 0;
+    stats.seasonClaimedTiers = [];
+    saveStats();
+  }
+
+  const el = document.createElement('div');
+  el.className = 'card shop-card';
+
+  const tiers = getSeasonTiers(seasonNum);
+  const claimed = stats.seasonClaimedTiers || [];
+  const points = stats.seasonPoints || 0;
+
+  function renderTiers() {
+    return tiers.map((tier, i) => {
+      const un = claimed.includes(i);
+      const isThemeTier = !!tier.theme;
+      const label = isThemeTier ? 'Tema exclusivo de la temporada' : `+${tier.ink} Tinta`;
+      let extraBtn = '';
+      if (isThemeTier && un) {
+        const owned = (stats.unlockedThemes || []).includes(tier.theme);
+        const active = stats.activeTheme === tier.theme;
+        extraBtn = `<button class="shop-item-btn season-equip-btn" data-theme="${tier.theme}" ${active ? 'disabled' : ''} style="margin-left:8px; white-space:nowrap;">${active ? '✓ Activo' : 'Equipar'}</button>`;
+      }
+      return `
+        <div class="ach-item${un ? ' unlocked' : ''}">
+          <div class="ach-icon">${un ? (isThemeTier ? '🎨' : '🎟️') : '🔒'}</div>
+          <div class="shop-item-info">
+            <div class="shop-item-name">Tramo ${i + 1}${isThemeTier ? ' · Exclusivo' : ''}</div>
+            <div class="shop-item-desc">${tier.threshold} pts · ${label}</div>
+          </div>
+          ${extraBtn || `<div class="ach-reward${un ? ' done' : ''}">${un ? '✓' : `${tier.threshold - points > 0 ? tier.threshold - points : 0} pts`}</div>`}
+        </div>`;
+    }).join('');
+  }
+
+  const got = claimed.length;
+  const total = tiers.length;
+
+  el.innerHTML = `
+    <div class="shop-header">
+      <div class="shop-title">Pase de Temporada ${seasonId}</div>
+      <button id="btn-season-close" class="btn-icon-close" aria-label="Cerrar pase de temporada">&times;</button>
+    </div>
+    <div class="ach-progress">
+      <span>${points} pts · ${daysLeft} día${daysLeft === 1 ? '' : 's'} restantes</span>
+      <div class="ach-progress-bar"><div style="width:${Math.round(got / total * 100)}%"></div></div>
+    </div>
+    <div class="custom-scrollbar" style="overflow-y:auto; flex:1; padding-right:4px;" id="season-tier-list">${renderTiers()}</div>
+  `;
+  app.appendChild(el);
+  gsap.fromTo(el, { y: 60, opacity: 0, scale: 0.97 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, ease: 'back.out(1.5)' });
+  const items = el.querySelectorAll('.ach-item');
+  gsap.set(items, { x: 24, opacity: 0 });
+  gsap.to(items, { x: 0, opacity: 1, stagger: 0.03, delay: 0.15, duration: 0.3, ease: 'power2.out' });
+
+  el.querySelector('#season-tier-list').addEventListener('click', e => {
+    const btn = e.target.closest('.season-equip-btn');
+    if (!btn || btn.disabled) return;
+    stats.activeTheme = btn.dataset.theme;
+    saveStats(); playSuccess(); vibrate(30);
+    updateAuroraColors();
+    el.querySelectorAll('.season-equip-btn').forEach(b => {
+      const active = b.dataset.theme === stats.activeTheme;
+      b.disabled = active;
+      b.textContent = active ? '✓ Activo' : 'Equipar';
+    });
+  });
+
+  document.getElementById('btn-season-close').addEventListener('click', () => {
+    playClick();
+    gsap.to(el, { y: 20, opacity: 0, duration: 0.2, onComplete: () => { el.remove(); buildStart(); } });
+  });
+}
+
+// ── TABLA DE CLASIFICACIÓN GLOBAL (Desafío Diario) ──────────────────────────
+// Requiere el endpoint /api/leaderboard (Vercel KV) desplegado; si no está
+// configurado o no hay red, todo esto falla en silencio y el juego sigue
+// funcionando exactamente igual sin tabla global.
+
+function getPlayerId() {
+  let id = localStorage.getItem('colorGamePlayerId');
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    localStorage.setItem('colorGamePlayerId', id);
+  }
+  return id;
+}
+
+// Se llama al terminar el Desafío Diario: nunca bloquea ni afecta al flujo
+// del juego si la petición falla (sin red, sin KV configurado, etc.).
+function submitDailyScore(avg) {
+  if (typeof fetch !== 'function') return;
+  fetch('/api/leaderboard', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      playerId: getPlayerId(),
+      name: stats.playerName || 'Anónimo',
+      score: avg,
+      date: getTodayStr(),
+    }),
+  }).catch(() => {});
+}
+
+function buildLeaderboard() {
+  const el = document.createElement('div');
+  el.className = 'card shop-card';
+  const myId = getPlayerId();
+  const today = getTodayStr();
+
+  function renderNameEditor() {
+    return `
+      <div class="setting-row" style="margin-bottom:10px;">
+        <div class="setting-info">
+          <div class="setting-name">Tu nombre en la tabla</div>
+          <div class="setting-desc">Se usa solo para el Desafío Diario global.</div>
+        </div>
+        <input id="lb-name-input" maxlength="18" placeholder="Anónimo" value="${(stats.playerName || '').replace(/"/g, '&quot;')}"
+          style="width:110px; padding:8px 10px; border-radius:10px; border:1px solid #2a2a2a; background:#111; color:#fff; font-size:0.8rem; font-weight:700;">
+      </div>`;
+  }
+
+  function renderBody(inner) {
+    el.innerHTML = `
+      <div class="shop-header">
+        <div class="shop-title">Clasificación de Hoy</div>
+        <button id="btn-lb-close" class="btn-icon-close" aria-label="Cerrar clasificación">&times;</button>
+      </div>
+      ${renderNameEditor()}
+      <div class="custom-scrollbar" style="overflow-y:auto; flex:1; padding-right:4px;">${inner}</div>
+    `;
+    document.getElementById('btn-lb-close').addEventListener('click', () => {
+      playClick();
+      gsap.to(el, { y: 20, opacity: 0, duration: 0.2, onComplete: () => { el.remove(); buildStart(); } });
+    });
+    document.getElementById('lb-name-input').addEventListener('change', e => {
+      stats.playerName = e.target.value.replace(/[<>]/g, '').slice(0, 18).trim();
+      saveStats();
+      playClick();
+      if (stats.dailyPlayed[today] !== undefined) submitDailyScore(stats.dailyPlayed[today]);
+    });
+  }
+
+  renderBody(`<div style="text-align:center; color:#666; padding:30px 0; font-size:0.85rem;">Cargando…</div>`);
+  app.appendChild(el);
+  gsap.fromTo(el, { y: 60, opacity: 0, scale: 0.97 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, ease: 'back.out(1.5)' });
+
+  fetch(`/api/leaderboard?date=${encodeURIComponent(today)}`)
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(data => {
+      const entries = (data.entries || []).sort((a, b) => b.score - a.score);
+      if (!entries.length) {
+        renderBody(`<div style="text-align:center; color:#666; padding:30px 0; font-size:0.85rem;">Nadie ha jugado el diario de hoy todavía.<br>¡Sé el primero!</div>`);
+        return;
+      }
+      const rows = entries.map((e, i) => `
+        <div class="ach-item${e.playerId === myId ? ' unlocked' : ''}">
+          <div class="ach-icon" style="font-size:0.95rem;">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</div>
+          <div class="shop-item-info">
+            <div class="shop-item-name">${e.name}${e.playerId === myId ? ' (tú)' : ''}</div>
+          </div>
+          <div class="ach-reward done" style="color:#fff;">${e.score.toFixed(2)}</div>
+        </div>`).join('');
+      renderBody(rows);
+      gsap.set(el.querySelectorAll('.ach-item'), { x: 24, opacity: 0 });
+      gsap.to(el.querySelectorAll('.ach-item'), { x: 0, opacity: 1, stagger: 0.03, duration: 0.3, ease: 'power2.out' });
+    })
+    .catch(() => {
+      renderBody(`<div style="text-align:center; color:#666; padding:30px 0; font-size:0.8rem;">No se pudo cargar la clasificación global.<br><small>Puede que el servidor aún no esté configurado.</small></div>`);
+    });
+}
+
 // ── GAME FLOW ─────────────────────────────────────────────────────────────────
 
 function startGame(mode) {
@@ -2734,14 +4018,14 @@ function startGame(mode) {
     isDaily: mode === 'daily',
     seed: mode === 'challenge' ? challengeSeed : (mode === 'daily' ? getTodayStr() : Math.random().toString().substring(2, 10)),
     round: 0,
-    hints: (mode === 'survival' ? 3 : 1) + (stats.extraHints > 0 ? 1 : 0),
-    hasRetry: stats.extraRetry > 0,
+    hints: (mode === 'survival' ? 3 : 1) + (stats.extraHints > 0 ? 1 : 0) + (stats.permHintBoost ? 1 : 0),
+    hasRetry: stats.extraRetry > 0 || stats.permRetryBoost,
     retryUsed: false,
     combo: 0,
     lives: mode === 'survival' ? 3 : null,
     colors: [],
     guesses: [], scores: [],
-    diffSecs: DIFFS[diffIdx].secs + (stats.extraTime > 0 ? 1 : 0),
+    diffSecs: DIFFS[diffIdx].secs + (stats.extraTime > 0 ? 1 : 0) + (stats.permTimeBoost ? 1 : 0),
   };
 
   if (stats.extraHints > 0) { stats.extraHints--; saveStats(); }
@@ -2817,6 +4101,9 @@ const THEME_COLORS = {
   themeForest: '#2d6a4f',
   themeOcean:  '#0369a1',
   themeFire:   '#ea580c',
+  themeSpace:  '#7c5cff',
+  themeSakura: '#f472b6',
+  themeNeon:   '#00e5ff',
 };
 
 const pCanvas = document.getElementById('particles-canvas');
@@ -2861,8 +4148,8 @@ function getSprite(shape, color, r) {
   if (pSprites.size > 240) pSprites.clear();
   const blur = isMobile ? 0 : (shape === 'flame' ? 15 : 10);
   const pad = blur + 3;
-  const w = Math.ceil((shape === 'leaf' ? r * 3.6 : r * 2) + pad * 2);
-  const h = Math.ceil((shape === 'leaf' ? r * 1.6 : (shape === 'flame' ? r * 2.5 : r * 2)) + pad * 2);
+  const w = Math.ceil((shape === 'leaf' ? r * 3.6 : shape === 'star' ? r * 3.2 : r * 2) + pad * 2);
+  const h = Math.ceil((shape === 'leaf' ? r * 1.6 : shape === 'star' ? r * 3.2 : (shape === 'flame' ? r * 2.5 : r * 2)) + pad * 2);
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const x = c.getContext('2d');
@@ -2880,6 +4167,20 @@ function getSprite(shape, color, r) {
     x.lineTo(cx - r, cy + r * 1.25);
     x.lineTo(cx + r, cy + r * 1.25);
     x.closePath(); x.fill();
+  } else if (shape === 'star') {
+    // Destello de 4 puntas para el tema Espacio
+    x.beginPath();
+    x.moveTo(cx, cy - r * 1.6); x.lineTo(cx + r * 0.35, cy - r * 0.35);
+    x.lineTo(cx + r * 1.6, cy); x.lineTo(cx + r * 0.35, cy + r * 0.35);
+    x.lineTo(cx, cy + r * 1.6); x.lineTo(cx - r * 0.35, cy + r * 0.35);
+    x.lineTo(cx - r * 1.6, cy); x.lineTo(cx - r * 0.35, cy - r * 0.35);
+    x.closePath(); x.fill();
+  } else if (shape === 'square') {
+    // Rombo neón para el tema Neón
+    x.save();
+    x.translate(cx, cy); x.rotate(Math.PI / 4);
+    x.fillRect(-r * 0.85, -r * 0.85, r * 1.7, r * 1.7);
+    x.restore();
   } else { // 'dot' y burbujas rellenas
     x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
   }
@@ -2889,11 +4190,13 @@ function getSprite(shape, color, r) {
 }
 
 let pPaused = false;
+let pLoopRunning = false;
 let lastPDraw = 0;
 function drawParticles(now) {
-  if (!pCanvas || pPaused || perfSettings.particles === 'none') return;
+  if (!pCanvas || pPaused || perfSettings.particles === 'none') { pLoopRunning = false; return; }
+  pLoopRunning = true;
   requestAnimationFrame(drawParticles);
-  
+
   now = now || performance.now();
   if (now - lastPDraw < 33) return; 
   lastPDraw = now;
@@ -2901,10 +4204,17 @@ function drawParticles(now) {
   pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
   
   const theme = stats.activeTheme;
+  const isSeasonTheme = !!theme && theme.startsWith('seasonTheme_');
+  const seasonHue = isSeasonTheme ? (parseInt(theme.split('_')[1], 10) || 0) : 0;
+  // Sin tema comprado: el fondo por defecto varía solo con la hora real —
+  // luciérnagas de noche, destello dorado de día. No se aplica si hay un
+  // tema activo (esos ya tienen su propia paleta deliberada).
+  const curHour = new Date().getHours();
+  const isNight = !theme && (curHour >= 21 || curHour < 6);
   const baseColor = pActiveColor
     ? hsvToCss(pActiveColor.h, pActiveColor.s, pActiveColor.v)
-    : (theme ? THEME_COLORS[theme] : '#888888');
-  
+    : (isSeasonTheme ? `hsl(${seasonHue}, 85%, 65%)` : (theme ? THEME_COLORS[theme] : '#888888'));
+
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
     pCtx.globalAlpha = p.alpha;
@@ -2917,9 +4227,25 @@ function drawParticles(now) {
       pColor = `hsl(${140 + p.hueOffset}, 45%, ${light}%)`;
     } else if (theme === 'themeFire' && !pActiveColor) {
       pColor = `hsl(${20 + p.hueOffset}, 85%, ${light}%)`;
+    } else if (theme === 'themeSpace' && !pActiveColor) {
+      pColor = `hsl(${245 + p.hueOffset}, 75%, ${Math.min(85, light + 15)}%)`;
+    } else if (theme === 'themeSakura' && !pActiveColor) {
+      pColor = `hsl(${330 + p.hueOffset}, 80%, ${light}%)`;
+    } else if (theme === 'themeNeon' && !pActiveColor) {
+      // Ciclo de matiz cuantizado en pasos de tiempo: da el efecto "neón
+      // pulsante" reusando siempre el mismo puñado de sprites cacheados
+      // en vez de generar uno nuevo por frame.
+      const neonHue = Math.floor(now / 400) % 12 * 30;
+      pColor = `hsl(${(neonHue + p.hueOffset) % 360}, 90%, 60%)`;
+    } else if (isSeasonTheme && !pActiveColor) {
+      pColor = `hsl(${(seasonHue + p.hueOffset + 360) % 360}, 85%, ${Math.min(85, light + 10)}%)`;
+    } else if (!theme && !pActiveColor) {
+      pColor = isNight
+        ? `hsl(${70 + p.hueOffset}, 85%, ${Math.min(80, light + 10)}%)`  // luciérnagas
+        : `hsl(${45 + p.hueOffset}, 90%, ${Math.min(80, light + 8)}%)`;   // sol
     }
 
-    const sway = Math.sin(now / 1200 + p.phase) * 0.3;
+    const sway = Math.sin(now / 1200 + p.phase) * (theme === 'themeSakura' ? 0.65 : 0.3);
 
     if (theme === 'themeForest') {
       // HOJAS: Elipses rotando suavemente
@@ -2942,34 +4268,264 @@ function drawParticles(now) {
       const sp = getSprite('flame', pColor, p.r);
       pCtx.drawImage(sp.c, p.x - sp.hw, (p.y - p.r * 1.25) - sp.hh);
     }
+    else if (theme === 'themeSpace') {
+      // ESTRELLAS: destellos que titilan lentamente
+      const twinkle = Math.sin(now / 500 + p.phase * 3) * 0.35 + 0.65;
+      pCtx.globalAlpha = p.alpha * twinkle;
+      const sp = getSprite('star', pColor, p.r);
+      pCtx.drawImage(sp.c, p.x - sp.hw, p.y - sp.hh);
+    }
+    else if (theme === 'themeSakura') {
+      // PÉTALOS: caen revoloteando en vez de flotar hacia arriba
+      const sp = getSprite('leaf', pColor, p.r);
+      pCtx.save();
+      pCtx.translate(p.x, p.y);
+      pCtx.rotate(-p.phase - now / 900);
+      pCtx.drawImage(sp.c, -sp.hw, -sp.hh);
+      pCtx.restore();
+    }
+    else if (theme === 'themeNeon') {
+      // RÓMBOS: parpadeo eléctrico ligero además del ciclo de color
+      const flicker = Math.sin(now / 140 + p.phase) * 0.25 + 0.75;
+      pCtx.globalAlpha = p.alpha * flicker;
+      const sp = getSprite('square', pColor, p.r);
+      pCtx.save();
+      pCtx.translate(p.x, p.y);
+      pCtx.rotate(now / 2000 + p.phase);
+      pCtx.drawImage(sp.c, -sp.hw, -sp.hh);
+      pCtx.restore();
+    }
+    else if (isSeasonTheme) {
+      // DESTELLOS DE TEMPORADA: como el tema Espacio pero con el tono
+      // exclusivo de la temporada y un titileo más lento y marcado.
+      const twinkle = Math.sin(now / 650 + p.phase * 2) * 0.4 + 0.6;
+      pCtx.globalAlpha = p.alpha * twinkle;
+      const sp = getSprite('star', pColor, p.r);
+      pCtx.save();
+      pCtx.translate(p.x, p.y);
+      pCtx.rotate(now / 3000 + p.phase);
+      pCtx.drawImage(sp.c, -sp.hw, -sp.hh);
+      pCtx.restore();
+    }
     else {
-      // PUNTOS: El efecto premium por defecto
+      // PUNTOS: el efecto por defecto. De noche parpadean como luciérnagas.
+      if (isNight && !pActiveColor) {
+        const flicker = Math.sin(now / 700 + p.phase * 2) * 0.4 + 0.6;
+        pCtx.globalAlpha = p.alpha * flicker;
+      }
       const sp = getSprite('dot', pColor, p.r);
       pCtx.drawImage(sp.c, p.x - sp.hw, p.y - sp.hh);
     }
 
     // FÍSICA
-    const speedMult = theme === 'themeFire' ? 1.8 : (theme === 'themeOcean' ? 0.7 : 1);
-    p.x += (p.vx + sway) * speedMult; 
-    p.y += p.vy * speedMult;
-    
-    if (p.y < -30) { 
-      p.y = pCanvas.height + 30; 
-      p.x = Math.random() * pCanvas.width; 
+    const speedMult = theme === 'themeFire' ? 1.8 : (theme === 'themeOcean' ? 0.7 : (theme === 'themeSpace' ? 0.45 : 1));
+    const yDir = theme === 'themeSakura' ? -1 : 1; // los pétalos caen: invierte el ascenso base
+    p.x += (p.vx + sway) * speedMult;
+    p.y += p.vy * speedMult * yDir;
+
+    if (p.y < -30) {
+      p.y = pCanvas.height + 30;
+      p.x = Math.random() * pCanvas.width;
+    } else if (p.y > pCanvas.height + 30) {
+      p.y = -30;
+      p.x = Math.random() * pCanvas.width;
     }
     if (p.x < -30) p.x = pCanvas.width + 30;
     if (p.x > pCanvas.width + 30) p.x = -30;
   }
 }
 
-window.addEventListener('resize', initParticles);
+// El bucle de dibujo se detiene solo (drawParticles deja de reprogramarse)
+// cuando las partículas están en "Ninguna" o la pestaña está oculta. Sin
+// esto, reactivarlas desde Ajustes las dejaba inicializadas pero invisibles
+// hasta recargar la página.
+function ensureParticleLoop() {
+  if (!pLoopRunning) drawParticles();
+}
+
+// Varios "resize" pueden llegar en el mismo frame (rotación, barra de
+// direcciones móvil); se agrupan en uno solo para no reconstruir el array
+// de partículas más de lo necesario.
+let resizeRAF = null;
+window.addEventListener('resize', () => {
+  if (resizeRAF) return;
+  resizeRAF = requestAnimationFrame(() => { resizeRAF = null; initParticles(); });
+});
 document.addEventListener('visibilitychange', () => {
   pPaused = document.hidden;
-  if (!pPaused) requestAnimationFrame(drawParticles);
+  if (!pPaused) ensureParticleLoop();
 });
 document.body.classList.toggle('perf-no-blur', !perfSettings.blur);
+document.body.classList.toggle('perf-no-aurora', !perfSettings.ambilight);
 initParticles();
-drawParticles();
+ensureParticleLoop();
+
+// ── FONDO AURORA ─────────────────────────────────────────────────────────────
+// Colorea las 3 manchas del fondo según el tema de partículas activo, para
+// que equipar un tema (tienda o Pase de Temporada) también cambie el
+// ambiente general de la app, no solo las partículas.
+const AURORA_THEME_HUES = {
+  themeForest: ['#2d6a4f', '#52b788', '#95d5b2'],
+  themeOcean:  ['#0369a1', '#38bdf8', '#7dd3fc'],
+  themeFire:   ['#ea580c', '#ff8c42', '#ffcc66'],
+  themeSpace:  ['#4c1d95', '#7c5cff', '#a78bfa'],
+  themeSakura: ['#db2777', '#f472b6', '#fbcfe8'],
+  themeNeon:   ['#00e5ff', '#ff00e5', '#eaff00'],
+};
+function updateAuroraColors() {
+  const blobs = document.querySelectorAll('.aurora-blob');
+  if (!blobs.length) return;
+  const theme = stats.activeTheme;
+  let colors;
+  if (theme && theme.startsWith('seasonTheme_')) {
+    const hue = parseInt(theme.split('_')[1], 10) || 0;
+    colors = [0, 40, -40].map(off => `hsl(${(hue + off + 360) % 360}, 80%, 60%)`);
+  } else {
+    colors = AURORA_THEME_HUES[theme] || ['#ff416c', '#45dcff', '#4cd964'];
+  }
+  blobs.forEach((b, i) => b.style.setProperty('--c', colors[i % colors.length]));
+}
+updateAuroraColors();
+
+// El fondo entero se desplaza un poco hacia el puntero (escritorio) o según
+// la inclinación del móvil (giróscopo): paralaje barato, un solo transform
+// en el contenedor con transición CSS de retardo para que se sienta
+// "flotante". Cada mancha sigue con su propia deriva CSS — transform de
+// padre e hijo se combinan solos, no hay pisada de propiedades.
+if (!prefersReducedMotion) {
+  const auroraBg = document.getElementById('aurora-bg');
+  if (auroraBg) {
+    if (!isMobile) {
+      let auroraRAF = null;
+      window.addEventListener('pointermove', e => {
+        if (auroraRAF) return;
+        auroraRAF = requestAnimationFrame(() => {
+          auroraRAF = null;
+          const nx = (e.clientX / window.innerWidth  - 0.5) * 2;
+          const ny = (e.clientY / window.innerHeight - 0.5) * 2;
+          auroraBg.style.transform = `translate(${nx * 22}px, ${ny * 18}px)`;
+        });
+      });
+    } else if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission !== 'function') {
+      // Solo donde el navegador NO exige un permiso explícito (iOS 13+ sí lo
+      // exige): pedir permiso solo por un fondo decorativo sería demasiada
+      // fricción, así que en iOS esta mejora simplemente no se activa.
+      let gyroRAF = null;
+      window.addEventListener('deviceorientation', e => {
+        if (gyroRAF || e.beta === null || e.gamma === null) return;
+        gyroRAF = requestAnimationFrame(() => {
+          gyroRAF = null;
+          const nx = Math.max(-1, Math.min(1, e.gamma / 30));
+          const ny = Math.max(-1, Math.min(1, (e.beta - 45) / 30)); // ~45° = móvil sujeto normal
+          auroraBg.style.transform = `translate(${nx * 22}px, ${ny * 18}px)`;
+        });
+      });
+    }
+  }
+}
+
+// Tocar/hacer clic en el fondo (fuera de tarjetas y botones) suelta una
+// mini explosión con los colores del tema activo — el mismo spawnBurst de
+// siempre, solo que ahora también reacciona a la nada, no solo a botones.
+document.addEventListener('pointerdown', e => {
+  if (e.target.closest('.card, button, input, a, [role="button"]')) return;
+  const theme = stats.activeTheme;
+  let colors = null;
+  if (theme && theme.startsWith('seasonTheme_')) {
+    const hue = parseInt(theme.split('_')[1], 10) || 0;
+    colors = [`hsl(${hue},85%,65%)`, '#ffffff'];
+  } else if (theme && THEME_COLORS[theme]) {
+    colors = [THEME_COLORS[theme], '#ffffff'];
+  }
+  spawnBurst(e.clientX, e.clientY, { count: 8, colors });
+});
+
+// Estela de cursor permanente: apagada por defecto (activable en Ajustes),
+// throttled para que no dispare spawnBurst en cada pixel de movimiento.
+let lastCursorTrailTime = 0;
+if (!prefersReducedMotion && !isMobile) {
+  window.addEventListener('pointermove', e => {
+    if (!stats.cursorTrailEnabled) return;
+    const now = performance.now();
+    if (now - lastCursorTrailTime < 70) return;
+    lastCursorTrailTime = now;
+    spawnBurst(e.clientX, e.clientY, { count: 1 });
+  });
+}
+
+// ── SKINS DE INTERFAZ ────────────────────────────────────────────────────────
+// Un solo atributo en <body> activa todas las reglas CSS del skin (tarjetas,
+// botones, fuente…). playTone(), colorWipe() y launchConfetti() también lo
+// consultan para variar sonido/transición/confeti sin más "modo" que este.
+function applySkin() {
+  document.body.dataset.skin = stats.activeSkin || 'default';
+}
+applySkin();
+
+function applyCursor() {
+  document.body.dataset.cursor = stats.activeCursor || 'default';
+}
+applyCursor();
+
+// ── PWA: instalable + recordatorio del Desafío Diario ──────────────────────
+// El recordatorio es "best effort": Periodic Background Sync solo lo soporta
+// Chrome/Edge en Android con la PWA instalada y suficiente "engagement" con
+// el sitio (el navegador decide, no hay forma de forzarlo). Sin ese soporte
+// (Safari/iOS, Firefox, desktop) la app funciona igual, simplemente sin el
+// aviso cuando está cerrada — no existe forma de dar push real sin backend.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
+function openSWFlagsDB() {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open('colorGameSW', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('flags');
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+// Se llama al completar el Desafío Diario y una vez al arrancar, para que el
+// Service Worker (que no puede leer localStorage) sepa si ya se jugó hoy.
+async function syncDailyFlagForSW() {
+  if (!('indexedDB' in window)) return;
+  try {
+    const db = await openSWFlagsDB();
+    const tx = db.transaction('flags', 'readwrite');
+    const today = stats.dailyPlayed[getTodayStr()] !== undefined ? getTodayStr() : null;
+    if (today) tx.objectStore('flags').put(today, 'lastPlayedDailyDate');
+  } catch (_) { /* IndexedDB no disponible: sin recordatorio, el juego sigue igual */ }
+}
+syncDailyFlagForSW();
+
+async function enableDailyReminder() {
+  if (!('Notification' in window)) return false;
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return false;
+  stats.dailyReminderEnabled = true;
+  saveStats();
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    if ('periodicSync' in reg) {
+      const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
+      if (status.state === 'granted') {
+        await reg.periodicSync.register('daily-streak-check', { minInterval: 20 * 60 * 60 * 1000 });
+      }
+    }
+  } catch (_) { /* sin soporte: el permiso de notificación queda igual concedido */ }
+  return true;
+}
+
+function disableDailyReminder() {
+  stats.dailyReminderEnabled = false;
+  saveStats();
+  navigator.serviceWorker?.ready
+    .then(reg => reg.periodicSync?.unregister('daily-streak-check'))
+    .catch(() => {});
+}
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 
