@@ -220,14 +220,39 @@ function vibrate(ms) {
   if (navigator.vibrate) navigator.vibrate(ms);
 }
 
+// ── Pool de partículas DOM ──────────────────────────────────────────────────
+// Con chispas en cada botón, crear y destruir cientos de <div> por minuto
+// pondría al recolector de basura a trabajar justo durante las animaciones.
+// El pool recicla los divs (mismo aspecto, coste de creación casi cero) y un
+// tope duro de partículas vivas garantiza que ni el peor pico (confeti +
+// fuegos + clics a la vez) pueda saturar un aparato modesto.
+const MAX_LIVE_DOTS = 220;
+let liveDots = 0;
+const dotPool = [];
+function acquireDot() {
+  const d = dotPool.pop() || document.createElement('div');
+  d._free = false;
+  liveDots++;
+  return d;
+}
+function releaseDot(d) {
+  if (d._free) return; // ya devuelto (onComplete + red de seguridad pueden coincidir)
+  d._free = true;
+  liveDots--;
+  gsap.killTweensOf(d);
+  d.remove();
+  if (dotPool.length < 160) dotPool.push(d);
+}
+
 // ── Explosión de puntitos de color al pulsar (juice barato: pocos nodos,
-//    solo transform+opacity, se autodestruyen). colors=null → arcoíris.
+//    solo transform+opacity, reciclados del pool). colors=null → arcoíris.
 function spawnBurst(x, y, opts = {}) {
   if (prefersReducedMotion) return;
-  const n = Math.max(1, Math.round((opts.count || 10) * burstScale()));
+  let n = Math.max(1, Math.round((opts.count || 10) * burstScale()));
+  n = Math.min(n, Math.max(0, MAX_LIVE_DOTS - liveDots));
   const colors = opts.colors || null;
   for (let i = 0; i < n; i++) {
-    const d = document.createElement('div');
+    const d = acquireDot();
     const size = 4 + Math.random() * 5;
     const c = colors ? colors[i % colors.length] : `hsl(${Math.round(Math.random() * 360)},85%,62%)`;
     d.style.cssText = `position:fixed; left:${x}px; top:${y}px; width:${size}px; height:${size}px; margin:-${size/2}px 0 0 -${size/2}px; border-radius:50%; background:${c}; pointer-events:none; z-index:5000; will-change:transform,opacity;`;
@@ -236,9 +261,9 @@ function spawnBurst(x, y, opts = {}) {
     const dist = 34 + Math.random() * 46;
     gsap.fromTo(d, { x: 0, y: 0, scale: 1, opacity: 1 },
       { x: Math.cos(ang) * dist, y: Math.sin(ang) * dist - 12, scale: 0.2, opacity: 0,
-        duration: 0.5 + Math.random() * 0.3, ease: 'power2.out', onComplete: () => d.remove() });
+        duration: 0.5 + Math.random() * 0.3, ease: 'power2.out', onComplete: () => releaseDot(d) });
     // Red de seguridad por si algo mata el tween (p.ej. salir al menú)
-    setTimeout(() => d.remove(), 1000);
+    setTimeout(() => releaseDot(d), 1000);
   }
 }
 
@@ -283,23 +308,25 @@ function shockwave(x, y, color = '#ffffff') {
 // CONVERGEN hacia él. Se usa cuando algo "se reconstruye" o absorbe energía.
 function spawnImplosion(x, y, opts = {}) {
   if (prefersReducedMotion) return;
-  const n = Math.max(1, Math.round((opts.count || 14) * burstScale()));
+  let n = Math.max(1, Math.round((opts.count || 14) * burstScale()));
+  n = Math.min(n, Math.max(0, MAX_LIVE_DOTS - liveDots));
   const colors = opts.colors || null;
   for (let i = 0; i < n; i++) {
-    const d = document.createElement('div');
+    const d = acquireDot();
     const size = 3 + Math.random() * 4;
     const c = colors ? colors[i % colors.length] : `hsl(${Math.round(Math.random() * 360)},85%,62%)`;
     const ang = Math.random() * Math.PI * 2;
     const dist = 80 + Math.random() * 130;
     d.style.cssText = `position:fixed; left:${x + Math.cos(ang) * dist}px; top:${y + Math.sin(ang) * dist}px; width:${size}px; height:${size}px; margin:-${size/2}px 0 0 -${size/2}px; border-radius:50%; background:${c}; pointer-events:none; z-index:5000; opacity:0; will-change:transform,opacity;`;
     document.body.appendChild(d);
-    gsap.to(d, { opacity: 1, duration: 0.12, delay: Math.random() * 0.18 });
+    const delay = Math.random() * 0.18;
+    gsap.fromTo(d, { x: 0, y: 0, scale: 1 }, { opacity: 1, duration: 0.12, delay });
     gsap.to(d, {
       x: -Math.cos(ang) * dist, y: -Math.sin(ang) * dist, scale: 0.3,
-      duration: 0.4 + Math.random() * 0.25, delay: Math.random() * 0.18,
-      ease: 'power2.in', onComplete: () => d.remove(),
+      duration: 0.4 + Math.random() * 0.25, delay,
+      ease: 'power2.in', onComplete: () => releaseDot(d),
     });
-    setTimeout(() => d.remove(), 1200); // red de seguridad
+    setTimeout(() => releaseDot(d), 1200); // red de seguridad
   }
 }
 
@@ -607,24 +634,27 @@ const lowPowerMode = prefersReducedMotion;
 // el nivel de detalle solo, de forma invisible — cada dispositivo recibe el
 // máximo que aguanta sin que nadie tenga que tocar ajustes. Los controles
 // manuales siguen existiendo para quien quiera fijarlo a mano.
+// FILOSOFÍA: la CALIDAD (cristal, brillos, luz ambiental, temas) va SIEMPRE
+// al máximo en todos los niveles. Lo único que el gobernador flexibiliza es
+// la DENSIDAD de partículas de fondo/explosiones — algo que nadie percibe
+// como "menos calidad", solo como "menos puntitos". El último nivel es una
+// salida de emergencia (solo si el aparato no llega ni a 30 fps) que apaga
+// únicamente el desenfoque de cristal, el efecto más caro y el que menos se
+// nota: las tarjetas son 97% opacas.
 const AUTO_LEVELS = [
-  { particles: 'ultra', ambilight: true,  glow: true,  blur: true  },
-  { particles: 'high',  ambilight: true,  glow: true,  blur: true  },
-  { particles: 'high',  ambilight: true,  glow: true,  blur: false },
-  { particles: 'low',   ambilight: true,  glow: true,  blur: false },
-  { particles: 'low',   ambilight: false, glow: false, blur: false },
+  { particles: 'ultra', ambilight: true, glow: true, blur: true  },
+  { particles: 'high',  ambilight: true, glow: true, blur: true  },
+  { particles: 'low',   ambilight: true, glow: true, blur: true  },
+  { particles: 'low',   ambilight: true, glow: true, blur: false }, // emergencia
 ];
 function startLevel() {
-  // Punto de partida optimista; el gobernador corrige en segundos. En móvil y
-  // PCs modestos se arranca un peldaño más abajo para que el primer instante
-  // ya sea fluido, y se sube enseguida si el aparato puede con más.
-  if (isMobile) return 2;
-  const weakPC = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
-  return weakPC ? 1 : 0;
+  // TODO el mundo arranca al máximo, también en móvil: el gobernador recorta
+  // densidad en segundos solo si hace falta de verdad.
+  return 0;
 }
 function defaultPerf() {
   // Los campos manuales solo se usan si el jugador desactiva el Auto.
-  return { auto: true, level: startLevel(), particles: 'high', ambilight: true, glow: true, blur: !isMobile };
+  return { auto: true, level: startLevel(), particles: 'ultra', ambilight: true, glow: true, blur: true };
 }
 let perfSettings = (() => {
   try {
@@ -632,7 +662,12 @@ let perfSettings = (() => {
     if (saved && typeof saved === 'object') {
       // Ajustes guardados con el formato viejo (sin "auto"): venían de tocar
       // los ajustes a mano, así que se respetan como modo manual.
-      return Object.assign(defaultPerf(), { auto: false }, saved);
+      const s = Object.assign(defaultPerf(), { auto: false }, saved);
+      // En Auto, cada visita arranca de nuevo al máximo: la calibración es
+      // cuestión de segundos y así nadie se queda "atrapado" en un nivel
+      // bajo por un mal día del dispositivo.
+      if (s.auto) s.level = startLevel();
+      return s;
     }
   } catch (_) {}
   return defaultPerf();
@@ -691,7 +726,10 @@ function fpsGovernor(now) {
   if (fpsWarmup) { fpsWarmup = false; return; }
 
   const lvl = Math.max(0, Math.min(AUTO_LEVELS.length - 1, perfSettings.level ?? 0));
-  if (fps < 46 && lvl < AUTO_LEVELS.length - 1) {
+  // Bajar de densidad es barato y reversible (fps<46). Entrar en el nivel de
+  // emergencia (apagar el cristal) exige un aparato realmente ahogado: <30.
+  const dropThreshold = (lvl === AUTO_LEVELS.length - 2) ? 30 : 46;
+  if (fps < dropThreshold && lvl < AUTO_LEVELS.length - 1) {
     if (now - fpsLastClimb < 25000) fpsClimbCap = Math.max(fpsClimbCap, lvl + 1);
     perfSettings.level = lvl + 1;
     fpsGoodStreak = 0;
@@ -968,8 +1006,9 @@ function buildSettings() {
           <button class="preset-btn${cur==='quality' ? ' active':''}" id="preset-quality">✨<br>Calidad</button>
         </div>
         <div class="setting-desc" style="margin-top:8px; line-height:1.5;">
-          <b style="color:#8ce0ff;">Auto (recomendado):</b> el juego mide la fluidez real de tu dispositivo
-          y ajusta el detalle solo, siempre al máximo que aguante. No hace falta tocar nada más.
+          <b style="color:#8ce0ff;">Auto (recomendado):</b> calidad SIEMPRE al máximo. El juego mide tu
+          fluidez real y, si hiciera falta, solo regula la cantidad de partículas de fondo
+          — nunca los efectos, brillos ni detalles. No hace falta tocar nada.
         </div>
       </div>
 
