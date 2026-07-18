@@ -1,4 +1,9 @@
 import gsap from 'gsap';
+import { inject } from '@vercel/analytics';
+
+// Estadísticas de visitas en el panel de Vercel. Solo en la web publicada:
+// en local no manda nada.
+if (import.meta.env.PROD) inject();
 
 // ── Audio & Stats ─────────────────────────────────────────────────────────────
 
@@ -219,7 +224,7 @@ function vibrate(ms) {
 //    solo transform+opacity, se autodestruyen). colors=null → arcoíris.
 function spawnBurst(x, y, opts = {}) {
   if (prefersReducedMotion) return;
-  const n = opts.count || 10;
+  const n = Math.max(1, Math.round((opts.count || 10) * burstScale()));
   const colors = opts.colors || null;
   for (let i = 0; i < n; i++) {
     const d = document.createElement('div');
@@ -261,6 +266,41 @@ function screenFlash(color = '#ffffff', opts = {}) {
   flash.style.cssText = `position:fixed; inset:0; background:${color}; opacity:${opts.peak ?? 0.35}; pointer-events:none; z-index:6000;`;
   document.body.appendChild(flash);
   gsap.to(flash, { opacity: 0, duration: opts.duration ?? 0.5, ease: 'power2.out', onComplete: () => flash.remove() });
+}
+
+// Onda expansiva: un anillo que crece y se desvanece desde un punto. Barato
+// (un div, solo transform+opacity) y muy resultón para momentos "¡PUM!".
+function shockwave(x, y, color = '#ffffff') {
+  if (prefersReducedMotion) return;
+  const ring = document.createElement('div');
+  ring.style.cssText = `position:fixed; left:${x}px; top:${y}px; width:24px; height:24px; margin:-12px 0 0 -12px; border-radius:50%; border:3px solid ${color}; pointer-events:none; z-index:6600; opacity:0.9; will-change:transform,opacity;`;
+  document.body.appendChild(ring);
+  gsap.fromTo(ring, { scale: 0.4 }, { scale: 16, opacity: 0, duration: 0.65, ease: 'power2.out', onComplete: () => ring.remove() });
+  setTimeout(() => ring.remove(), 1000);
+}
+
+// Lo contrario de spawnBurst: partículas que nacen alrededor de un punto y
+// CONVERGEN hacia él. Se usa cuando algo "se reconstruye" o absorbe energía.
+function spawnImplosion(x, y, opts = {}) {
+  if (prefersReducedMotion) return;
+  const n = Math.max(1, Math.round((opts.count || 14) * burstScale()));
+  const colors = opts.colors || null;
+  for (let i = 0; i < n; i++) {
+    const d = document.createElement('div');
+    const size = 3 + Math.random() * 4;
+    const c = colors ? colors[i % colors.length] : `hsl(${Math.round(Math.random() * 360)},85%,62%)`;
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 80 + Math.random() * 130;
+    d.style.cssText = `position:fixed; left:${x + Math.cos(ang) * dist}px; top:${y + Math.sin(ang) * dist}px; width:${size}px; height:${size}px; margin:-${size/2}px 0 0 -${size/2}px; border-radius:50%; background:${c}; pointer-events:none; z-index:5000; opacity:0; will-change:transform,opacity;`;
+    document.body.appendChild(d);
+    gsap.to(d, { opacity: 1, duration: 0.12, delay: Math.random() * 0.18 });
+    gsap.to(d, {
+      x: -Math.cos(ang) * dist, y: -Math.sin(ang) * dist, scale: 0.3,
+      duration: 0.4 + Math.random() * 0.25, delay: Math.random() * 0.18,
+      ease: 'power2.in', onComplete: () => d.remove(),
+    });
+    setTimeout(() => d.remove(), 1200); // red de seguridad
+  }
 }
 
 // Barrido de color de pantalla completa entre fases del juego. Es una capa
@@ -404,7 +444,13 @@ muteBtn.addEventListener('click', () => {
   if (!isMuted) initAudio();
 });
 
-let stats = JSON.parse(localStorage.getItem('colorGameStats')) || {
+// Si lo guardado está corrupto (JSON inválido), se arranca de cero en vez de
+// dejar el juego muerto en pantalla negra (el error aquí ocurría antes del
+// try/catch del arranque, así que ni siquiera se veía el aviso de recarga).
+let stats = (() => {
+  try { return JSON.parse(localStorage.getItem('colorGameStats')); }
+  catch (_) { return null; }
+})() || {
   bestScore: 0,
   gamesPlayed: 0,
   streak: 0,
@@ -557,37 +603,112 @@ const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)
 const lowPowerMode = prefersReducedMotion;
 
 // ── Ajustes de rendimiento ────────────────────────────────────────────────────
-function defaultPerf() {
-  if (isMobile) return { particles: 'none', ambilight: false, glow: false, blur: false };
-  // En equipos modestos se conservan todas las animaciones, pero se arranca sin
-  // el desenfoque de cristal (apenas se aprecia: las tarjetas son 97% opacas y
-  // es lo más caro en GPUs antiguas) y con menos partículas.
+// Modo "Auto" (por defecto): un gobernador mide los FPS reales y sube o baja
+// el nivel de detalle solo, de forma invisible — cada dispositivo recibe el
+// máximo que aguanta sin que nadie tenga que tocar ajustes. Los controles
+// manuales siguen existiendo para quien quiera fijarlo a mano.
+const AUTO_LEVELS = [
+  { particles: 'ultra', ambilight: true,  glow: true,  blur: true  },
+  { particles: 'high',  ambilight: true,  glow: true,  blur: true  },
+  { particles: 'high',  ambilight: true,  glow: true,  blur: false },
+  { particles: 'low',   ambilight: true,  glow: true,  blur: false },
+  { particles: 'low',   ambilight: false, glow: false, blur: false },
+];
+function startLevel() {
+  // Punto de partida optimista; el gobernador corrige en segundos. En móvil y
+  // PCs modestos se arranca un peldaño más abajo para que el primer instante
+  // ya sea fluido, y se sube enseguida si el aparato puede con más.
+  if (isMobile) return 2;
   const weakPC = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
-  return weakPC
-    ? { particles: 'low',  ambilight: true, glow: true, blur: false }
-    : { particles: 'high', ambilight: true, glow: true, blur: true  };
+  return weakPC ? 1 : 0;
+}
+function defaultPerf() {
+  // Los campos manuales solo se usan si el jugador desactiva el Auto.
+  return { auto: true, level: startLevel(), particles: 'high', ambilight: true, glow: true, blur: !isMobile };
 }
 let perfSettings = (() => {
-  try { return JSON.parse(localStorage.getItem('colorGamePerf')) || defaultPerf(); }
-  catch { return defaultPerf(); }
+  try {
+    const saved = JSON.parse(localStorage.getItem('colorGamePerf'));
+    if (saved && typeof saved === 'object') {
+      // Ajustes guardados con el formato viejo (sin "auto"): venían de tocar
+      // los ajustes a mano, así que se respetan como modo manual.
+      return Object.assign(defaultPerf(), { auto: false }, saved);
+    }
+  } catch (_) {}
+  return defaultPerf();
 })();
+function effPerf() {
+  if (!perfSettings.auto) return perfSettings;
+  const lvl = Math.max(0, Math.min(AUTO_LEVELS.length - 1, perfSettings.level ?? 0));
+  return AUTO_LEVELS[lvl];
+}
+// Cuántas partículas sueltan los efectos puntuales (explosiones, confeti…)
+// según el nivel de detalle actual: más chispas donde el equipo va sobrado.
+function burstScale() {
+  const p = effPerf().particles;
+  return p === 'ultra' ? 1.6 : p === 'high' ? 1.1 : p === 'low' ? 0.8 : 0.6;
+}
 function savePerf() { localStorage.setItem('colorGamePerf', JSON.stringify(perfSettings)); }
 function applyPerf() {
-  document.body.classList.toggle('perf-no-blur', !perfSettings.blur);
-  document.body.classList.toggle('perf-no-aurora', !perfSettings.ambilight);
+  const p = effPerf();
+  document.body.classList.toggle('perf-no-blur', !p.blur);
+  document.body.classList.toggle('perf-no-aurora', !p.ambilight);
   initParticles();
   ensureParticleLoop();
   // Ocultar/mostrar ambilight existente según ajuste
   const ambi = document.getElementById('ambilight');
-  if (ambi && !perfSettings.ambilight) ambi.style.background = 'transparent';
+  if (ambi && !p.ambilight) ambi.style.background = 'transparent';
 }
 function getPreset() {
   const p = perfSettings;
+  if (p.auto) return 'auto';
   if (p.particles === 'none' && !p.ambilight && !p.glow && !p.blur) return 'perf';
   if (p.particles === 'low'  && !p.ambilight && !p.glow && !p.blur) return 'bal';
   if (p.particles === 'high' &&  p.ambilight &&  p.glow &&  p.blur) return 'quality';
   return 'custom';
 }
+
+// ── GOBERNADOR DE FPS ────────────────────────────────────────────────────────
+// Cuenta frames en ventanas de 2s. Si el dispositivo no llega a ~46 fps baja
+// un nivel de detalle al instante; si va sobrado (58+) durante un buen rato,
+// sube uno. Si una subida provoca bajón enseguida, ese nivel se marca como
+// "demasiado" y no se vuelve a intentar en esta sesión (evita el parpadeo
+// de subir-bajar-subir en equipos justos).
+let fpsFrames = 0, fpsWindowStart = performance.now();
+let fpsGoodStreak = 0, fpsLastClimb = 0, fpsClimbCap = 0;
+let fpsWarmup = true; // la 1ª ventana se descarta: la carga inicial da FPS falsos
+function fpsGovernor(now) {
+  requestAnimationFrame(fpsGovernor);
+  if (document.hidden || !perfSettings.auto || prefersReducedMotion) {
+    fpsFrames = 0; fpsWindowStart = now;
+    return;
+  }
+  fpsFrames++;
+  const elapsed = now - fpsWindowStart;
+  if (elapsed < 2000) return;
+  const fps = fpsFrames * 1000 / elapsed;
+  fpsFrames = 0; fpsWindowStart = now;
+  if (fpsWarmup) { fpsWarmup = false; return; }
+
+  const lvl = Math.max(0, Math.min(AUTO_LEVELS.length - 1, perfSettings.level ?? 0));
+  if (fps < 46 && lvl < AUTO_LEVELS.length - 1) {
+    if (now - fpsLastClimb < 25000) fpsClimbCap = Math.max(fpsClimbCap, lvl + 1);
+    perfSettings.level = lvl + 1;
+    fpsGoodStreak = 0;
+    savePerf(); applyPerf();
+  } else if (fps >= 58 && lvl > 0 && lvl - 1 >= fpsClimbCap) {
+    fpsGoodStreak++;
+    if (fpsGoodStreak >= 6) {
+      perfSettings.level = lvl - 1;
+      fpsGoodStreak = 0;
+      fpsLastClimb = now;
+      savePerf(); applyPerf();
+    }
+  } else {
+    fpsGoodStreak = 0;
+  }
+}
+requestAnimationFrame(fpsGovernor);
 
 function hsvToCss(h, s, v) {
   s /= 100; v /= 100;
@@ -811,9 +932,7 @@ function cycleDiff() {
   diffIdx = (diffIdx + 1) % DIFFS.length;
   const d = DIFFS[diffIdx];
   const nameEl = document.getElementById('diff-name');
-  const timeEl = document.getElementById('diff-time');
   if (nameEl) nameEl.textContent = d.label;
-  if (timeEl) timeEl.textContent = d.sub;
   document.querySelectorAll('.diff-dot').forEach((dot, i) => {
     dot.classList.toggle('on', i <= diffIdx);
   });
@@ -841,15 +960,20 @@ function buildSettings() {
       </div>
 
       <div style="padding:0 4px;">
-        <div class="shop-section-title" style="margin-bottom:8px;">⚡ Modo rápido</div>
+        <div class="shop-section-title" style="margin-bottom:8px;">⚡ Calidad gráfica</div>
         <div class="preset-row">
-          <button class="preset-btn${cur==='perf'    ? ' active':''}" id="preset-perf">🚀<br>Rendimiento</button>
-          <button class="preset-btn${cur==='bal'     ? ' active':''}" id="preset-bal">⚖️<br>Equilibrado</button>
+          <button class="preset-btn${cur==='auto'    ? ' active':''}" id="preset-auto">🤖<br>Auto</button>
+          <button class="preset-btn${cur==='perf'    ? ' active':''}" id="preset-perf">🚀<br>Rendim.</button>
+          <button class="preset-btn${cur==='bal'     ? ' active':''}" id="preset-bal">⚖️<br>Equilib.</button>
           <button class="preset-btn${cur==='quality' ? ' active':''}" id="preset-quality">✨<br>Calidad</button>
+        </div>
+        <div class="setting-desc" style="margin-top:8px; line-height:1.5;">
+          <b style="color:#8ce0ff;">Auto (recomendado):</b> el juego mide la fluidez real de tu dispositivo
+          y ajusta el detalle solo, siempre al máximo que aguante. No hace falta tocar nada más.
         </div>
       </div>
 
-      <div class="shop-section-title" style="margin-top:4px;">🎨 Detalle</div>
+      <div class="shop-section-title" style="margin-top:4px;">🎨 Detalle manual</div>
 
       <div class="setting-row">
         <div class="setting-info">
@@ -857,9 +981,10 @@ function buildSettings() {
           <div class="setting-desc">Puntos animados que flotan en el fondo</div>
         </div>
         <div class="seg-ctrl">
-          <button class="seg-btn${perfSettings.particles==='none' ?' active':''}" data-key="particles" data-val="none">Ninguna</button>
-          <button class="seg-btn${perfSettings.particles==='low'  ?' active':''}" data-key="particles" data-val="low">Pocas</button>
-          <button class="seg-btn${perfSettings.particles==='high' ?' active':''}" data-key="particles" data-val="high">Muchas</button>
+          <button class="seg-btn${!perfSettings.auto && perfSettings.particles==='none' ?' active':''}" data-key="particles" data-val="none">0</button>
+          <button class="seg-btn${!perfSettings.auto && perfSettings.particles==='low'  ?' active':''}" data-key="particles" data-val="low">Pocas</button>
+          <button class="seg-btn${!perfSettings.auto && perfSettings.particles==='high' ?' active':''}" data-key="particles" data-val="high">Muchas</button>
+          <button class="seg-btn${!perfSettings.auto && perfSettings.particles==='ultra'?' active':''}" data-key="particles" data-val="ultra">Ultra</button>
         </div>
       </div>
 
@@ -868,7 +993,7 @@ function buildSettings() {
           <div class="setting-name">Luz ambiental</div>
           <div class="setting-desc">Brillo de fondo al seleccionar colores</div>
         </div>
-        <button class="toggle-pill${perfSettings.ambilight?' on':''}" data-key="ambilight" aria-label="Luz ambiental"></button>
+        <button class="toggle-pill${effPerf().ambilight?' on':''}" data-key="ambilight" aria-label="Luz ambiental"></button>
       </div>
 
       <div class="setting-row">
@@ -876,7 +1001,7 @@ function buildSettings() {
           <div class="setting-name">Sombras y brillo</div>
           <div class="setting-desc">Glow dinámico en el selector de color</div>
         </div>
-        <button class="toggle-pill${perfSettings.glow?' on':''}" data-key="glow" aria-label="Sombras"></button>
+        <button class="toggle-pill${effPerf().glow?' on':''}" data-key="glow" aria-label="Sombras"></button>
       </div>
 
       <div class="setting-row">
@@ -884,7 +1009,7 @@ function buildSettings() {
           <div class="setting-name">Efectos de cristal</div>
           <div class="setting-desc">Desenfoque en botones y diálogos</div>
         </div>
-        <button class="toggle-pill${perfSettings.blur?' on':''}" data-key="blur" aria-label="Cristal"></button>
+        <button class="toggle-pill${effPerf().blur?' on':''}" data-key="blur" aria-label="Cristal"></button>
       </div>
 
       <div class="shop-section-title" style="margin-top:8px;">🔔 Notificaciones</div>
@@ -916,9 +1041,25 @@ function buildSettings() {
         onComplete: () => { el.remove(); buildStart(); } });
     });
 
+    // Cualquier ajuste manual desactiva el Auto, partiendo de lo que el Auto
+    // tenía puesto en ese momento (así el cambio es exactamente el que se ve).
+    function goManual() {
+      if (!perfSettings.auto) return;
+      Object.assign(perfSettings, effPerf());
+      perfSettings.auto = false;
+    }
+
+    document.getElementById('preset-auto').addEventListener('click', () => {
+      playClick();
+      perfSettings.auto = true;
+      savePerf(); applyPerf();
+      renderUI();
+    });
+
     ['perf','bal','quality'].forEach(id => {
       document.getElementById(`preset-${id}`).addEventListener('click', () => {
         playClick();
+        perfSettings.auto = false;
         Object.assign(perfSettings, PRESETS[id]);
         savePerf(); applyPerf();
         renderUI();
@@ -928,6 +1069,7 @@ function buildSettings() {
     el.querySelectorAll('.seg-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         playClick();
+        goManual();
         perfSettings[btn.dataset.key] = btn.dataset.val;
         savePerf(); applyPerf();
         renderUI();
@@ -937,6 +1079,7 @@ function buildSettings() {
     el.querySelectorAll('.toggle-pill[data-key]').forEach(pill => {
       pill.addEventListener('click', () => {
         playClick();
+        goManual();
         perfSettings[pill.dataset.key] = !perfSettings[pill.dataset.key];
         savePerf(); applyPerf();
         renderUI();
@@ -1065,12 +1208,12 @@ function buildStart() {
       </div>
       ${targetHtml}
       <div class="actions-col">
-        <div class="action-btn play" id="btn-challenge" style="background: linear-gradient(145deg, #007aff, #005bb5); border-color: #007aff;">
-          <div class="btn-title" style="color:#fff">Aceptar Reto</div>
-        </div>
-        <div class="action-btn play" id="btn-cancel-challenge">
+        <button class="wide-btn" id="btn-challenge" style="background: linear-gradient(145deg, #007aff, #005bb5); border-color: #007aff; text-align:center;">
+          <div class="btn-title">Aceptar Reto</div>
+        </button>
+        <button class="wide-btn" id="btn-cancel-challenge" style="text-align:center;">
           <div class="btn-title">Ignorar y salir</div>
-        </div>
+        </button>
       </div>
     `;
     app.appendChild(el);
@@ -1129,6 +1272,7 @@ function buildStart() {
     </div>
     <button id="btn-history" class="btn-icon" style="position:absolute; top:56px; right:24px;" title="Muro de Historial" aria-label="Historial de partidas">${wallSVG}</button>
     <button id="btn-ach" class="btn-icon" style="position:absolute; top:92px; right:24px;" title="Logros" aria-label="Logros">${trophySVG}</button>
+    <button id="btn-stats" class="btn-icon" style="position:absolute; top:128px; right:24px; font-size:1.15rem;" title="Estadísticas y Entrenamiento" aria-label="Estadísticas y Entrenamiento">📊</button>
     <button id="btn-shop" class="btn-icon${activePowerUps > 0 ? ' btn-icon--badge' : ''}" style="position:absolute; top:56px; left:24px;" title="Tienda de Tinta" aria-label="Abrir tienda">${shopSVG}${activePowerUps > 0 ? `<span class="shop-badge">${activePowerUps}</span>` : ''}</button>
     <button id="btn-season" class="btn-icon" style="position:absolute; top:92px; left:24px; font-size:1.15rem;" title="Pase de Temporada" aria-label="Pase de Temporada">🎟️</button>
     <button id="btn-leaderboard" class="btn-icon" style="position:absolute; top:128px; left:24px; font-size:1.15rem;" title="Clasificación de Hoy" aria-label="Clasificación de Hoy">🏅</button>
@@ -1164,10 +1308,7 @@ function buildStart() {
 
       <div class="diff-chip-modern" id="diff-chip" title="Cambiar Dificultad">
         <div class="diff-dots">
-          <span class="diff-dot on"></span>
-          <span class="diff-dot"></span>
-          <span class="diff-dot"></span>
-          <span class="diff-dot"></span>
+          ${DIFFS.map((_, i) => `<span class="diff-dot${i <= diffIdx ? ' on' : ''}"></span>`).join('')}
         </div>
         <span class="diff-name" id="diff-name">${DIFFS[diffIdx].label}</span>
       </div>
@@ -1221,6 +1362,12 @@ function buildStart() {
     playClick();
     el.remove(); stopTaglines();
     buildAchievements();
+  });
+
+  document.getElementById('btn-stats').addEventListener('click', () => {
+    playClick();
+    el.remove(); stopTaglines();
+    buildStatsScreen();
   });
 
   document.getElementById('btn-calendar').addEventListener('click', () => {
@@ -1306,6 +1453,8 @@ function buildStart() {
     'M50,48 L20,55 L2,68',  'M50,48 L82,58 L98,72',
     'M50,48 L46,80 L40,100', 'M50,48 L58,82 L64,102',
     'M38,30 L48,15',        'M65,25 L58,10',
+    'M20,55 L12,38',        'M82,58 L90,42',
+    'M46,80 L30,90',        'M58,82 L74,92',
   ];
 
   function ensureCrackOverlay() {
@@ -1360,17 +1509,23 @@ function buildStart() {
     removeCracks(); // las grietas ya cumplieron su función, ahora se rompe de verdad
 
     playTone(90, 'sawtooth', 0.3, 0.18);
+    playTone(55, 'sine', 0.5, 0.22); // sub-grave: el "boom" que se siente en el pecho
+    // Cristales cayendo tras el estallido
+    [1650, 2100, 1300, 1900].forEach((f, i) => setTimeout(() => playTone(f, 'square', 0.07, 0.035), 130 + i * 85));
     screenFlash('#ffffff', { peak: 0.45, duration: 0.35 });
+    shockwave(cx, cy, '#ffffff');
+    setTimeout(() => shockwave(cx, cy, '#ffd166'), 90);
     screenShake(document.body, { amp: 14, count: 6 });
     vibrate([40, 20, 60]);
 
-    // Trozos de verdad (no solo puntitos): unos 9 fragmentos rectangulares
-    // que salen despedidos girando desde distintos puntos de la tarjeta.
+    // Trozos de verdad (no solo puntitos): fragmentos rectangulares que salen
+    // despedidos girando desde distintos puntos de la tarjeta (más trozos
+    // cuanto más detalle gráfico permita el dispositivo).
     const shardWrap = document.createElement('div');
     shardWrap.style.cssText = 'position:fixed; inset:0; z-index:6500; pointer-events:none;';
     document.body.appendChild(shardWrap);
     const palette = ['#ff416c', '#ffd166', '#4cd964', '#45dcff', '#8b5cf6', '#ffffff'];
-    const shards = Array.from({ length: 9 }, () => {
+    const shards = Array.from({ length: Math.max(7, Math.round(12 * burstScale())) }, () => {
       const sx = rect.left + Math.random() * rect.width;
       const sy = rect.top + Math.random() * rect.height;
       const size = 18 + Math.random() * 30;
@@ -1406,12 +1561,21 @@ function buildStart() {
         gsap.set(el, { rotation: 0, scale: 0.12 });
         schedule(() => {
           if (!el.isConnected) return;
-          // Reconstrucción en 3 segundos completos, con un par de chispazos
-          // de partículas a mitad de camino para que se note que "vuelve".
+          // Reconstrucción: primero la energía CONVERGE hacia el centro
+          // (implosión de partículas + nota ascendente) y entonces la tarjeta
+          // renace en 3 segundos con rebote, chispazos y onda final.
+          spawnImplosion(cx, cy, { count: 22, colors: ['#ffffff', '#45dcff', '#ffd166'] });
+          playTone(220, 'sine', 0.5, 0.07);
+          setTimeout(() => playTone(440, 'sine', 0.4, 0.07), 250);
           spawnBurst(cx, cy, { count: 24, colors: ['#ffffff', '#45dcff', '#ffd166'] });
           gsap.to(el, { opacity: 1, scale: 1, duration: 3, ease: 'elastic.out(1, 0.22)' });
-          schedule(() => spawnBurst(cx, cy, { count: 18, colors: ['#ff416c', '#4cd964', '#ffffff'] }), 900);
-          schedule(() => { screenFlash('#ffffff', { peak: 0.12, duration: 0.3 }); spawnBurst(cx, cy, { count: 22 }); }, 1900);
+          schedule(() => { spawnImplosion(cx, cy, { count: 14, colors: ['#ff416c', '#4cd964', '#ffffff'] }); spawnBurst(cx, cy, { count: 18, colors: ['#ff416c', '#4cd964', '#ffffff'] }); }, 900);
+          schedule(() => {
+            screenFlash('#ffffff', { peak: 0.12, duration: 0.3 });
+            shockwave(cx, cy, '#45dcff');
+            spawnBurst(cx, cy, { count: 26 });
+            playTone(880, 'sine', 0.35, 0.08);
+          }, 1900);
         }, 700);
       },
     });
@@ -1425,7 +1589,7 @@ function buildStart() {
     ensureCrackOverlay();
     let intensity = 0;
     const MAX_I = 16;
-    const RAMP_DURATION = 10; // segundos de temblor creciente antes de explotar
+    const RAMP_DURATION = 7; // segundos de temblor creciente antes de explotar
     const TICK = 0.06;
     const RAMP_STEPS = Math.round(RAMP_DURATION / TICK);
     let step = 0;
@@ -1528,7 +1692,9 @@ function buildStart() {
         // Si algo decorativo falla, goToGame() ya está programada por el
         // setTimeout de arriba y arrancará la partida igualmente.
       }
-    }, { once: true });
+      // El botón bloqueado (diario ya jugado) no usa {once:true}: su única
+      // respuesta es el temblor de aviso y debe funcionar en cada clic.
+    }, locked ? undefined : { once: true });
   });
 
   // Entrance
@@ -1866,7 +2032,7 @@ function updatePicker() {
       guessCard.style.background = isBlind ? '#111' : `linear-gradient(145deg, ${hsvToCss(P.h, 22, 13)}, #111 60%)`;
     }
 
-    const thumbGlow = (isBlind || !perfSettings.glow) ? '0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px rgba(255,255,255,0.2)' : `0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px ${css}70, 0 0 12px ${css}60`;
+    const thumbGlow = (isBlind || !effPerf().glow) ? '0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px rgba(255,255,255,0.2)' : `0 2px 10px rgba(0,0,0,0.55), 0 0 0 2.5px ${css}70, 0 0 12px ${css}60`;
     ['hue-thumb','sat-thumb','bri-thumb'].forEach(id => {
       const t = document.getElementById(id);
       if (t) {
@@ -1886,7 +2052,7 @@ function updatePicker() {
     if (satStrip) { const t = document.getElementById('sat-thumb'); if (t) t.style.top = `${((100-P.s)/100)*satStrip.clientHeight-11}px`; satStrip.setAttribute('aria-valuenow', P.s); }
     if (briStrip) { const t = document.getElementById('bri-thumb'); if (t) t.style.top = `${((100-P.v)/100)*briStrip.clientHeight-11}px`; briStrip.setAttribute('aria-valuenow', P.v); }
 
-    if (perfSettings.ambilight) {
+    if (effPerf().ambilight) {
       let ambi = document.getElementById('ambilight');
       if (!ambi) {
         ambi = document.createElement('div');
@@ -2201,6 +2367,11 @@ function buildResult(target, guess, sc, bonusStr = '') {
         playTone(150, 'sawtooth', 0.4, 0.2);
       } else if (sc >= 9.5) {
         vibrate([100, 50, 100]);
+        const pillEl = document.getElementById('score-pill');
+        if (pillEl) {
+          const pr = pillEl.getBoundingClientRect();
+          shockwave(pr.left + pr.width / 2, pr.top + pr.height / 2, '#ffd700');
+        }
         const perf = document.createElement('div');
         perf.textContent = '¡PERFECTO!';
         perf.style.cssText = 'position:absolute; top:25%; left:50%; transform:translate(-50%,-50%); font-size:3.5rem; font-weight:900; color:#fff; text-shadow:0 0 30px rgba(255,255,255,0.8); z-index:100; pointer-events:none; letter-spacing:-2px;';
@@ -2444,7 +2615,7 @@ function buildFinal() {
   }).join('');
 
   el.innerHTML = `
-    <div class="final-eyebrow">${{ daily: 'Desafío Diario', survival: 'Muerte Súbita', timed: 'Contrarreloj', zen: 'Modo Zen', inverse: 'Modo Inverso' }[G.mode] || 'Puntuación Final'}</div>
+    <div class="final-eyebrow">${{ daily: 'Desafío Diario', survival: 'Muerte Súbita', timed: 'Contrarreloj', zen: 'Modo Zen', inverse: 'Modo Inverso', training: 'Entrenamiento' }[G.mode] || 'Puntuación Final'}</div>
     ${isDuel ? `<div class="duel-result-banner ${duelWon ? 'duel-won' : (duelTied ? 'duel-tied' : 'duel-lost')}" id="duel-result-banner">
       ${duelWon ? `🏆 ¡GANASTE EL DUELO! ${avg.toFixed(2)} vs ${challengeTargetScore.toFixed(2)}`
         : duelTied ? `🤝 EMPATE · ${avg.toFixed(2)} vs ${challengeTargetScore.toFixed(2)}`
@@ -2527,6 +2698,8 @@ function buildFinal() {
   if (leveledUp) {
     screenFlash('#4cd964', { peak: 0.3, duration: 0.7 });
     screenShake(el, { amp: 12, count: 6 });
+    shockwave(window.innerWidth / 2, window.innerHeight / 2, '#4cd964');
+    fireworksShow(3, 1300);
   }
 
   if (isNewRecord) {
@@ -2550,6 +2723,7 @@ function buildFinal() {
           const r = duelBanner.getBoundingClientRect();
           spawnBurst(r.left + r.width / 2, r.top + r.height / 2,
             { count: 18, colors: ['#ffd700', '#4cd964', '#ffffff'] });
+          shockwave(r.left + r.width / 2, r.top + r.height / 2, '#ffd700');
         }, 120);
         screenFlash('#ffd700', { peak: 0.32, duration: 0.65 });
         screenShake(el, { amp: 14, count: 7 });
@@ -2635,7 +2809,7 @@ function renderShareCard() {
   x.font = '900 96px Inter, sans-serif';
   x.textAlign = 'center';
   x.fillText('color', W / 2, 155);
-  const modeNames = { daily: 'Desafío Diario', survival: 'Muerte Súbita', timed: 'Contrarreloj', zen: 'Modo Zen', inverse: 'Modo Inverso', challenge: 'Reto', practice: 'Práctica' };
+  const modeNames = { daily: 'Desafío Diario', survival: 'Muerte Súbita', timed: 'Contrarreloj', zen: 'Modo Zen', inverse: 'Modo Inverso', challenge: 'Reto', practice: 'Práctica', training: 'Entrenamiento' };
   x.fillStyle = '#888';
   x.font = '700 34px Inter, sans-serif';
   x.fillText(`${modeNames[G.mode] || 'Partida'} · ${new Date().toLocaleDateString()}`, W / 2, 212);
@@ -2730,6 +2904,7 @@ function shareResult() {
   else if (G.mode === 'timed') title += ` - Contrarreloj`;
   else if (G.mode === 'zen') title += ` - Zen`;
   else if (G.mode === 'inverse') title += ` - Inverso`;
+  else if (G.mode === 'training') title += ` - Entrenamiento`;
   else title += ` - Práctica`;
 
   const diffName = DIFFS[diffIdx].label;
@@ -2790,7 +2965,8 @@ function launchConfetti(score, intensityMult = 1) {
 
   // El multiplicador de racha refuerza visualmente el premio, pero se limita
   // a 2.2x para no disparar el coste en gama baja con "RACHA PERFECTA" (x3).
-  const count = Math.floor((score * 20 + 40) * Math.min(2.2, intensityMult));
+  // burstScale() añade más piezas aún en dispositivos que van sobrados.
+  const count = Math.floor((score * 20 + 40) * Math.min(2.2, intensityMult) * burstScale());
   const cx    = canvas.width  / 2;
   const cy    = canvas.height * 0.55;
 
@@ -4070,7 +4246,7 @@ function buildLeaderboard() {
 
 // ── GAME FLOW ─────────────────────────────────────────────────────────────────
 
-function startGame(mode) {
+function startGame(mode, opts = {}) {
   initAudio();
   G = {
     mode,
@@ -4103,8 +4279,22 @@ function startGame(mode) {
 
   // Supervivencia y Contrarreloj generan colores sobre la marcha
   const numRounds = (mode === 'survival' || mode === 'timed') ? 1 : ROUNDS;
-  for (let i = 0; i < numRounds; i++) {
-    G.colors.push({ h: randInt(0, 359), s: randInt(40, 100), v: randInt(22, 82) });
+  if (mode === 'training' && opts.axis) {
+    // Entrenamiento del punto débil: los otros dos componentes se quedan
+    // fijos toda la partida, así lo ÚNICO que cambia (y lo único que hay
+    // que memorizar) es justo el eje que peor se te da.
+    const fixed = { h: randInt(0, 359), s: randInt(55, 90), v: randInt(45, 75) };
+    for (let i = 0; i < numRounds; i++) {
+      const c = { ...fixed };
+      if (opts.axis === 'h') c.h = randInt(0, 359);
+      else if (opts.axis === 's') c.s = randInt(5, 100);
+      else c.v = randInt(15, 92);
+      G.colors.push(c);
+    }
+  } else {
+    for (let i = 0; i < numRounds; i++) {
+      G.colors.push({ h: randInt(0, 359), s: randInt(40, 100), v: randInt(22, 82) });
+    }
   }
 
   pActiveColor = null;
@@ -4172,7 +4362,8 @@ let pActiveColor = null;
 
 function initParticles() {
   if (!pCanvas) return;
-  if (perfSettings.particles === 'none') {
+  const density = effPerf().particles;
+  if (density === 'none') {
     pCanvas.width = 1;
     pCanvas.height = 1;
     pCanvas.style.display = 'none';
@@ -4182,7 +4373,7 @@ function initParticles() {
   pCanvas.style.display = '';
   pCanvas.width = window.innerWidth;
   pCanvas.height = window.innerHeight;
-  const count = perfSettings.particles === 'low' ? 30 : 55;
+  const count = density === 'low' ? 30 : density === 'ultra' ? 95 : 55;
   particles = Array.from({ length: count }, () => ({
     x: Math.random() * pCanvas.width,
     y: Math.random() * pCanvas.height,
@@ -4252,7 +4443,7 @@ let pPaused = false;
 let pLoopRunning = false;
 let lastPDraw = 0;
 function drawParticles(now) {
-  if (!pCanvas || pPaused || perfSettings.particles === 'none') { pLoopRunning = false; return; }
+  if (!pCanvas || pPaused || effPerf().particles === 'none') { pLoopRunning = false; return; }
   pLoopRunning = true;
   requestAnimationFrame(drawParticles);
 
@@ -4414,10 +4605,7 @@ document.addEventListener('visibilitychange', () => {
   pPaused = document.hidden;
   if (!pPaused) ensureParticleLoop();
 });
-document.body.classList.toggle('perf-no-blur', !perfSettings.blur);
-document.body.classList.toggle('perf-no-aurora', !perfSettings.ambilight);
-initParticles();
-ensureParticleLoop();
+applyPerf();
 
 // ── FONDO AURORA ─────────────────────────────────────────────────────────────
 // Colorea las 3 manchas del fondo según el tema de partículas activo, para
@@ -4497,6 +4685,15 @@ document.addEventListener('pointerdown', e => {
     colors = [THEME_COLORS[theme], '#ffffff'];
   }
   spawnBurst(e.clientX, e.clientY, { count: 8, colors });
+});
+
+// Y TODO botón del juego suelta un chispazo al pulsarlo, esté donde esté
+// (menú, tienda, ajustes, resultado…). Pequeño a propósito: los momentos
+// importantes ya tienen sus explosiones grandes propias y así no compiten.
+document.addEventListener('pointerdown', e => {
+  const btn = e.target.closest('button, [role="button"]');
+  if (!btn || btn.disabled) return;
+  spawnBurst(e.clientX, e.clientY, { count: 5 });
 });
 
 // Estela de cursor permanente: apagada por defecto (activable en Ajustes),
