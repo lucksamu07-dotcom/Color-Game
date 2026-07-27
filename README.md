@@ -6,7 +6,7 @@ Un juego de memoria cromática: te enseñamos un color durante unos segundos, de
 
 Simple. Cruel. Adictivo.
 
-🕹️ **Juega ahora:** [colormemory.vercel.app](https://colormemory.vercel.app/)
+🕹️ **Juega ahora:** [www.gamecolor20.games](https://www.gamecolor20.games/)
 
 ---
 

@@ -2895,7 +2895,7 @@ function renderShareCard() {
 
   x.fillStyle = '#555';
   x.font = '700 30px Inter, sans-serif';
-  x.fillText('¿Me superas? → colormemory.vercel.app', W / 2, H - 56);
+  x.fillText('¿Me superas? → www.gamecolor20.games', W / 2, H - 56);
 
   drawShareFrame(x, W, H);
   return c;
